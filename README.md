@@ -181,6 +181,7 @@ Files are numbered in run order. There is no `05_*`: the Layer 2 logic lives in 
 | File                      | What it does                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `01_load_glucoren.sh`   | Copies the five course CSVs to the Cloud Storage bucket and loads them into BigQuery as `nba.raw_*`. Re-runnable (replaces tables). Reads the course repo only. Prints row counts at the end.                                                                                                                                                                                                                                        |
+| `DESIGN_NOTES.md` | Short write-ups of design decisions and incidents behind the console (BigQuery table-update quota, re-attaching to a run, the pending-changes rule, two windows, hidden tables). |
 | `02_build_features.sql` | Builds `nba.features` (one row per HCP: attributes, segment, 2025-only prescribing history, channel affinities) and `nba.uplift_train` (one row per HCP-week with the logged action and outcome). The leakage guard lives here.                                                                                                                                                                                                    |
 | `03_baseline_uplift.py` | Layer 1. `evaluate()` runs a held-out check (split by HCP) with inverse-propensity-weighted policy values and a calibration table. `score_and_write()` refits on all randomized rows, scores the latest week for every HCP, adds a KMeans segment, and writes `nba.recommendations`. Environment variables: `TRAIN_MAX_WEEK` (train only through this week), `MODEL_VERSION` (label), `SKIP_EVAL=1` (skip the evaluation), `USE_PARTD_FEATURES=1` (add the Part D benchmark features, off by default). |
 | `04_budgeted_eval.py` | Answers "if we can contact only K% of HCP-weeks, does targeting by uplift beat random?" Uses 5-fold cross-validation grouped by HCP, so no HCP is scored by a model that saw it, with single-model predictions (not averaged) to match what is deployed. Repeats with 3 seeded fold assignments and reports each plus the mean, then an HCP-level bootstrap. Writes `outputs/budget_curve.csv`, `budget_curve_by_seed.csv` and `.png`. |
@@ -257,12 +258,12 @@ Files are numbered in run order. There is no `05_*`: the Layer 2 logic lives in 
   ```bash
   gcloud auth login   # your own Google account
   ```
-- The course repo present locally (path is set at the top of `01_load_glucoren.sh`)
+- The course repo present locally (export `NBA_COURSE_REPO` with its path before running `01_load_glucoren.sh`)
 
 ### Build in order
 
 ```bash
-./01_load_glucoren.sh                                              # load raw tables
+NBA_COURSE_REPO=/path/to/course-repo ./01_load_glucoren.sh          # load raw tables
 bq --project_id=fall26-ails-termproj-nba query --use_legacy_sql=false < 02_build_features.sql
 python3 -I 03_baseline_uplift.py                                   # Layer 1 + held-out evaluation
 python3 -I layer2.py                                               # Layer 2 -> recommendations_final
@@ -459,31 +460,24 @@ Only one run or background task is allowed at a time (others get HTTP 409). When
 
 ## Admin tab (operators only)
 
-The demo-data controls (I frequency cap, II consent withdrawal, III compliance guard, IV rewind model, Reset, active-changes list) live on an **Admin** page, reached by a gear icon (tooltip "Admin") at the right of the top bar (operators only; it is not one of the agent tabs); the server already refuses viewers' change requests. While a Manual run is paused at Gate 2 a change applied in the Admin window re-checks the gate automatically ("Re-checked after your change"), and the Trainer status card shows "Changes in progress: … Manage in Admin" while a change is in effect. The gear and "Manage in Admin" open Admin in its own browser window (named `nba-admin`) so a demo can use two windows side by side; the Trainer and Admin pages refresh their status, tables and options when their window regains focus, and also immediately when another open window finishes an apply, a reset or a run (a same-browser `BroadcastChannel`, no polling). A window that did not start a running task shows it ("Working: reset is still running."). On screen the options are numbered I–IV; the stored option keys (and the API) remain A, B, C and E.
+The scenario controls (I frequency cap, II consent withdrawal, III compliance guard, IV rewind model, Reset, and the list of changes in progress) live on an **Admin** page, reached by a gear icon at the right of the top bar. Only operators see it, and the server refuses everyone else's change requests. It opens in its own browser window so a demo can use two windows side by side: apply a change in Admin and the Trainer window updates, and a Manual run paused at Gate 2 re-checks itself. On screen the scenarios are numbered I to IV; the stored option keys and the API still use A, B, C and E.
 
-## Trainer page layout and hidden tables
+## Console behaviors worth knowing
 
-The Trainer has four sections, each a title with one line under it: **Check Model Status**, **Run Trainer** (the two gates explained, the Manual/Auto options, Preview and Run Trainer), **Watch Logs** (the live trace,) and **Browse Data** (table list with 5-row previews). The page never uses the word "demo": experimentation lives on the Admin page, and a change applied there while a run is paused at Gate 2 re-checks the gate automatically. The tables `run_log`, `demo_changes` and `demo_overrides` are hidden from Browse Data; the server (`workflow.HIDDEN_TABLES`) omits them from the list and refuses to preview them, while `run_log` is still written for auditing.
+- **Hidden tables.** `run_log`, `demo_changes` and `demo_overrides` never appear in Browse Data: the server leaves them out of the list and refuses to preview them (`workflow.HIDDEN_TABLES`). `run_log` is still written for auditing.
+- **Runs survive a reload.** A reloaded page, or a second window, re-attaches to a run that is in progress or paused at a gate. A paused run is abandoned after 20 minutes.
+- **"Recommendations have pending changes"** means a source table changed after the last publish; it is a cheap check, not a recomputation. Preview gives the exact effect.
+- Design notes and the reasons behind these: [DESIGN_NOTES.md](DESIGN_NOTES.md).
 
-## Runs that outlive the page
+## Teammate access
 
-`/api/state` reports `active_run` (the id of a run that is running or paused at a gate). A reloaded page, or a second window, uses it to re-attach: Watch Logs redraws the run with its Continue/Abort buttons, and the Trainer status line shows **Run in progress** or **Paused at Gate N** instead of the freshness verdict until the run ends. When a run pauses, Watch Logs scrolls into view and the browser tab title becomes "Paused · NBA Studio". Gate 1's prompt now states the decision and what Continue does. A paused run is still abandoned after 20 minutes. A new run attempt while one is active shows "A run is already active" with a link to it.
+`13_grant_teammate_access.sh <email> [...]` gives a teammate the scoped roles to deploy and run the project, and `--revoke` removes them again. The project owner runs it. A teammate then needs to:
 
-## BigQuery table-update quota (why bookkeeping tables are created once)
+1. Log in with `gcloud auth login` using their own account (`07_deploy.sh` and `common.py` use the active login; `NBA_ACCOUNT` overrides it).
+2. Export `NBA_OAUTH_CLIENT_ID` (ask the owner for it).
+3. Copy `allowed_emails.example.txt` to `allowed_emails.txt` and list who may sign in (while the app is in Testing mode, those people must also be test users on the OAuth consent screen). The real file and `operator_emails.txt` are git-ignored.
 
-BigQuery counts every table-changing statement, including `CREATE TABLE IF NOT EXISTS`, against a per-table limit of about 5 operations per 10 seconds. `demo.ensure_tables()` used to run on every status or options load, so a burst of page refreshes (two windows, focus refreshes, run polling) made the status card fail with "Job exceeded rate limits: Your table exceeded quota for table update operations". It now creates `nba.demo_changes` and `nba.demo_overrides` once per server process (`test_demo_ensure.py`), and a failed background refresh keeps the status card as it was instead of replacing it with the error.
-
-## "Recommendations have pending changes"
-
-The Trainer's status card has two lines. **Model** answers Layer 1's question (has the model seen the latest outcomes?). **Recommendations** answers Layer 2's: it shows *pending changes* when a source table Layer 2 reads (any `raw_*` table, or the wording overrides) was modified after both the last publish of `recommendations_final` and the last time Layer 2's gate checked (`run_log`, step `layer2_gate`; a gate that decided SKIP counts as having looked). It is a cheap metadata check (`workflow.recs_freshness`, rule in `recs_status`, tests in `test_recs_freshness.py`); it does not recompute Layer 2, so it means "source data changed", not "N recommendations will change". Preview gives the exact answer. While a run is active the card shows only the run line.
-
-## Teammate access (deploying this project)
-
-`13_grant_teammate_access.sh <email> [...]` gives a teammate the scoped roles needed to deploy and run the project, and `--revoke` removes them again (idempotent; run by the project owner). Granted: Cloud Run Admin, Cloud Build Editor, Cloud Scheduler Admin, Service Usage Consumer, BigQuery Data Editor and Job User, Vertex AI User, Secret Manager Viewer (metadata only, cannot read secret values), Logs Viewer, Service Account User on `nba-pipeline`, `nba-agent2-reader` and the default compute account, and Storage Object Admin on the `run-sources-…` bucket only. Not granted: Owner/Editor, billing or IAM rights, secret values, or impersonation of `nba-sql-reader`.
-
-Caveats: (1) anyone who can deploy can ship code that runs as those service accounts, so they inherit what the accounts can do; (2) the default compute account carries the project-level Editor role, so "Service Account User" on it is broader than it looks (it is what Cloud Build source deploys use); (3) everything runs in one project and one BigQuery dataset, so two people deploying at once overwrite each other and Admin scenarios change the data for everyone; (4) cost bills to the project owner's billing account (the $20 alert). A teammate also needs `gcloud` logged in with their own account, `NBA_OAUTH_CLIENT_ID` exported, and their address in `allowed_emails.txt` (and, while the app is in Testing mode, in the OAuth consent screen's test users). `07_deploy.sh` and `common.py` use the active `gcloud` login (override with `NBA_ACCOUNT`). Copy `allowed_emails.example.txt` to `allowed_emails.txt` and list who may sign in; the real file (and `operator_emails.txt`) are git-ignored, and so are `__pycache__` and the generated `outputs/` folder (rerun the scripts to recreate it). `01_load_glucoren.sh` is the one-time data load and still points at the course repo on the owner's laptop.
-
-Granted on 2026-11-15 to the three teammates in `allowed_emails.txt` with a university address.
+Everything shares one GCP project and one BigQuery dataset, so coordinate deploys, and remember that Admin scenarios change the data for everyone. `01_load_glucoren.sh` is the one-time data load; it needs `NBA_COURSE_REPO` pointing at the course repo folder.
 
 ## License
 
