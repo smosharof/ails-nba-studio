@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><link rel="icon" href="data:,">
+<title>NBA Studio</title>
+<style>
+/* Design tokens (same system as Cruisewise: one blue accent, whisper shadows, 8px grid) */
+:root{--bg:#fff;--surface:#f8f9fa;--border:#dadce0;--accent:#1a73e8;--accent-dark:#1557b0;--accent-soft:#e8f0fe;--on-accent:#fff;
+--text:#202124;--mute:#5f6368;--ok:#1e8e3e;--okbg:#e6f4ea;--warn:#b06000;--warnbg:#fef7e0;--bad:#c5221f;--badbg:#fce8e6;
+--shadow:0 1px 2px rgba(0,0,0,.08);--seg-on:#5f6368;--seg-on-text:#fff;--seg-off:#f1f3f4;--r:8px;--pill:20px;--font:"Google Sans","Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"Roboto Mono",ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#202124;--surface:#292a2d;--border:#3c4043;--accent:#8ab4f8;--accent-dark:#aecbfa;--accent-soft:#2b3a55;--on-accent:#202124;
+--text:#e8eaed;--mute:#9aa0a6;--ok:#81c995;--okbg:#1e3a2a;--warn:#fdd663;--warnbg:#3b3317;--bad:#f28b82;--badbg:#3c2423;--shadow:0 1px 2px rgba(0,0,0,.5);--seg-on:#9aa0a6;--seg-on-text:#202124;--seg-off:#2d2e31}}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font:16px/1.55 var(--font);color:var(--text);background:var(--bg)}
+h1,h2,h3{font-weight:500;line-height:1.25}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.container{width:100%;max-width:1040px;margin-inline:auto;padding-inline:24px}
+/* top bar */
+.nav{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--border)}
+.nav .container{display:flex;align-items:center;gap:24px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-size:1.25rem;font-weight:500;color:var(--text)}
+.brand svg{color:var(--accent);flex-shrink:0}.brand small{font-weight:400;font-size:.75rem;color:var(--mute);margin-left:2px}
+.tabs{display:flex;gap:4px;flex:1;margin-left:8px}
+.tab-btn{font:inherit;font-size:.875rem;color:var(--mute);background:none;border:0;border-bottom:3px solid transparent;height:64px;padding:0 14px;cursor:pointer;transition:color 150ms}
+.adminlink{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;color:var(--mute);text-decoration:none;border-radius:50%}.adminlink:hover,.adminlink.active{color:var(--accent)}.adminlink[hidden]{display:none}.backlink{font-size:.875rem;display:inline-block;margin-bottom:8px}
+.tab-btn:hover{color:var(--accent)}.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.who{font-size:.8125rem;color:var(--mute);white-space:nowrap}
+/* layout */
+.tab{display:none;padding:32px 0 64px}.tab.active{display:block}
+.hero{padding:8px 0 24px}.hero h1{font-size:2rem;font-weight:400;margin-bottom:8px}.hero p{color:var(--mute);max-width:640px;font-size:.9375rem}
+.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);padding:24px;margin:16px 0}
+.sect{margin:40px 0}.sect>h2,.sect>.sect__head,.sect>.hrow{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:16px}.sect h2{font-size:1.375rem;font-weight:500}.runleft{display:grid}.gates{margin-top:12px;width:0;min-width:100%}.gico{flex:none;margin-top:1px;color:var(--mute)}.gates p{display:flex;gap:8px;align-items:flex-start;color:var(--mute);font-size:.8125rem;margin:0 0 4px;opacity:.85}
+.sect>.sect__head h2{margin:0}.modes{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px 28px}.mode{display:flex;align-items:baseline;gap:8px;cursor:pointer;font-size:.875rem}.mode input{accent-color:var(--mute);margin:0;transform:translateY(2px)}.mode .mname{color:var(--text)}.mode .mdesc{color:var(--mute)}.dtools{display:flex;justify-content:flex-end;margin:0 0 4px}
+.runrow{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}.runbtns{display:flex;gap:12px;flex-wrap:wrap}.modehint{font-size:.875rem;margin:12px 0 0;max-width:420px}#prev{margin-top:24px}.dt th{border-bottom:0}
+.sect .sub{color:var(--mute);font-size:.875rem;margin-bottom:16px}
+.dt tr.tblrow td,.dt tr.sub>td{border-bottom:0}.dt tr.tblrow:hover td,.dt tr.tblrow.open td{background:var(--accent-soft)}
+.card h2{font-size:1.0625rem;margin-bottom:4px}.card .sub{color:var(--mute);font-size:.875rem;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}#opts{grid-template-columns:repeat(2,minmax(0,1fr))}@media (max-width:760px){#opts{grid-template-columns:1fr}}
+.mute{color:var(--mute);font-size:.875rem}.err{color:var(--bad);font-size:.875rem;margin-top:8px}
+/* buttons + chips */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:.875rem;font-weight:500;cursor:pointer;border:1px solid transparent;border-radius:var(--pill);padding:9px 22px;transition:background 150ms,color 150ms,opacity 150ms;white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn--primary{background:var(--accent);color:var(--on-accent)}.btn--primary:hover:not(:disabled){background:var(--accent-dark)}
+.btn--secondary{background:transparent;color:var(--accent);border-color:var(--border)}.btn--secondary:hover:not(:disabled){background:var(--accent-soft)}.btn--outline{border-color:var(--accent)}
+.btn--danger{background:transparent;color:var(--bad);border-color:var(--bad)}.btn--danger:hover:not(:disabled){background:var(--badbg)}
+.btn--sm{padding:6px 16px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
+.chip{display:inline-flex;align-items:center;padding:6px 14px;border-radius:var(--pill);border:1.5px solid var(--border);background:var(--surface);color:var(--mute);font:inherit;font-size:.8125rem;cursor:pointer;transition:all 150ms;user-select:none}
+.chip:hover{border-color:var(--accent);color:var(--accent)}.chip.selected{background:var(--bg);border-color:var(--accent);color:var(--accent);font-weight:500}
+.pill{display:inline-block;padding:2px 10px;border-radius:var(--pill);font-size:.75rem;font-weight:600;letter-spacing:.02em}
+.pill.ok{background:var(--okbg);color:var(--ok)}.pill.warn{background:var(--warnbg);color:var(--warn)}.pill.bad{background:var(--badbg);color:var(--bad)}.pill.mu{background:var(--surface);color:var(--mute);border:1px solid var(--border)}.pill.blue{background:var(--accent-soft);color:var(--accent)}
+/* status card */
+.status+.status{margin-top:8px}.status{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}.status .head{font-size:1rem;font-weight:400}.statusline{display:flex;align-items:baseline;gap:4px 12px;flex-wrap:wrap;flex:1;min-width:0}
+.dot{width:12px;height:12px;border-radius:50%;margin-top:9px;flex-shrink:0}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.run{background:transparent;box-sizing:border-box;border:2px solid var(--border);border-top-color:var(--accent);animation:s 1s linear infinite}
+.facts{display:flex;flex-wrap:wrap;gap:12px 28px;margin-top:16px;width:100%}
+.fact span{display:block;font-size:.75rem;color:var(--mute)}.fact b{font-weight:400;font-size:.8125rem;white-space:nowrap}@media (max-width:640px){.fact b{white-space:normal}}
+/* options */
+.opt{border:1px solid var(--border);border-radius:var(--r);padding:16px;background:var(--bg);display:flex;flex-direction:column}
+.opt h3{font-size:.9375rem;display:flex;gap:8px;align-items:center;margin-bottom:6px}.opt p{font-size:.8125rem;color:var(--mute);margin-bottom:6px}.opt .btn{margin-top:auto;align-self:flex-start}
+.opt .expect{color:var(--text);opacity:.85}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--pill);overflow:hidden}.seg label{padding:7px 18px;font-size:.875rem;cursor:pointer;color:var(--mute);background:var(--seg-off)}
+.seg input{display:none}.seg input:checked+span{color:var(--seg-on-text)}.seg label:has(input:checked){background:var(--seg-on);color:var(--seg-on-text)}.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+/* preview tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px}
+.tile{border:1px solid var(--border);border-radius:var(--r);padding:16px;background:var(--surface)}.tile b{display:block;margin-bottom:6px}.tile p{font-size:.875rem}
+/* timeline */
+.timeline{position:relative;margin-top:8px}.timeline::before{content:"";position:absolute;left:13px;top:10px;bottom:10px;width:2px;background:var(--border)}
+.step{position:relative;display:grid;grid-template-columns:28px 1fr;gap:12px;padding:10px 0}
+.ic{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8125rem;font-weight:700;background:var(--bg);border:2px solid var(--border);color:var(--mute)}
+.ic.done{border-color:var(--ok);background:var(--okbg);color:var(--ok)}.ic.attention,.ic.failed{border-color:var(--bad);background:var(--badbg);color:var(--bad)}.ic.running{border-color:var(--accent);color:var(--accent)}
+.ic.skipped,.ic.superseded{border-style:dashed}
+.step .t{font-weight:500}.step .t small{font-weight:400;color:var(--mute)}.step .r{font-size:.875rem}.step .n{font-size:.8125rem;color:var(--mute);margin-top:4px;padding-left:10px;border-left:3px solid var(--accent-soft)}
+details{margin-top:6px;font-size:.8125rem}summary{cursor:pointer;color:var(--accent)}pre{white-space:pre-wrap;font:12px/1.5 var(--mono);background:var(--surface);padding:10px;border-radius:var(--r);overflow:auto;max-height:240px;margin-top:6px}
+.gate{border:1px solid var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,var(--bg));border-radius:var(--r);padding:12px 16px;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:.8125rem;margin-top:8px}th,td{border-bottom:1px solid var(--border);padding:7px 10px;text-align:left}th{color:var(--mute);font-weight:500;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+.checks{list-style:none;margin-top:8px}.checks li{font-size:.875rem;padding:3px 0}.checks .y{color:var(--ok);font-weight:700}.checks .x{color:var(--bad);font-weight:700}
+/* chat */
+.split{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:stretch;height:calc(100vh - 180px);min-height:700px}.chatcard{display:flex;flex-direction:column;flex:1;min-height:0;padding:16px 16px 14px;margin:0}.chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding:4px 6px 12px}.side{display:flex;flex-direction:column;min-height:0}.sidecard{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin:0;padding:16px 18px;border:0;box-shadow:none;background:color-mix(in srgb,var(--accent-soft) 40%,var(--bg))}.sug{list-style:none;margin:6px 0 0}.sug li{position:relative}.sug__btn{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;font-size:.875rem;color:var(--text);background:none;border:0;padding:8px 8px;cursor:pointer;border-radius:6px}.sug__btn::before{content:"→";order:2;color:var(--accent);opacity:.6}.sug__btn:hover,.sug__btn:focus-visible{background:var(--accent-soft);color:var(--accent);outline:none}.sug__btn::after{content:attr(data-hint);position:absolute;right:0;bottom:calc(100% - 2px);width:250px;background:var(--text);color:var(--bg);font-size:.75rem;line-height:1.4;padding:8px 10px;border-radius:6px;opacity:0;pointer-events:none;transform:translateY(4px);transition:opacity 120ms,transform 120ms;z-index:30;box-shadow:var(--shadow)}.sug__btn:hover::after,.sug__btn:focus-visible::after{opacity:1;transform:none}.sidecard .cap + .cap{margin-top:20px;padding-top:18px;border-top:2px solid var(--border)}.sidecard .cap{margin-bottom:0;flex:none}.sidecard .can{border:0;border-radius:0;background:none;padding:18px 0 0;display:flex;flex-direction:column;flex:1;min-height:0}.canhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}.can .chev{margin-left:auto;color:var(--accent);transition:transform 150ms}.can.open .chev{transform:rotate(90deg)}.can__body{flex:1;min-height:90px;overflow-y:auto;margin-top:8px;padding-right:4px}.can:not(.open) .can__body{display:none}.can:not(.open){flex:none}.main{min-width:0;min-height:0;display:flex;flex-direction:column}.hero{flex:none}.side{margin-top:24px}.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--border);border-radius:50%;background:var(--bg);color:var(--mute);cursor:pointer;transition:color 150ms,border-color 150ms,background 150ms}.iconbtn:hover,.iconbtn:focus-visible{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);outline:none}.chathead{display:flex;justify-content:flex-end;min-height:30px;margin-bottom:4px}.sqlwrap{position:relative}.sqlwrap pre{padding-right:44px}.sqlwrap .iconbtn{position:absolute;top:10px;right:6px}@media (max-width:900px){.split{grid-template-columns:1fr;height:auto;min-height:0}.side{margin-top:0}.sidecard{overflow:visible}.chatcard{flex:none;min-height:420px}.chat{max-height:55vh}.can__body{overflow:visible}}
+.msg{max-width:88%;padding:12px 16px;border-radius:16px;font-size:.9375rem;overflow-wrap:anywhere}
+.msg.me{align-self:flex-end;background:var(--accent);color:var(--on-accent);border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg.bot p{margin:4px 0}.msg.bot ul{margin:6px 0 6px 20px}.msg.bot table{margin:8px 0}.msg code{font:12px var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+.dt{table-layout:fixed;width:100%}.dt th{text-transform:none;letter-spacing:0;font-size:.8125rem}.dt th:nth-child(1){width:36px}.dt th:nth-child(2){width:32%}.dt th:nth-child(3){width:22%}.dt th:nth-child(4){width:14%}.dt td{overflow:hidden;text-overflow:ellipsis}.sub td{overflow:visible}.minis{max-width:100%}.mini{width:max-content}.tblrow{cursor:pointer}.tblrow:hover td{background:var(--surface)}.tblrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.tblrow td:first-child{width:28px}.tblrow .chev{display:inline-block;color:var(--accent);transition:transform 150ms}.tblrow.open .chev{transform:rotate(90deg)}.sub td{background:var(--surface);padding:0 12px 14px}.minis{overflow-x:auto;margin-top:6px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg)}.mini{font-size:.75rem;margin:0;min-width:100%}.mini th,.mini td{white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;padding:6px 10px}.mini th{text-transform:none;letter-spacing:0;font-size:.75rem;color:var(--mute);background:var(--surface)}.demoNote{margin-top:12px;font-size:.875rem;background:var(--accent-soft);border-radius:var(--r);padding:8px 12px}.sqlbox{margin-top:10px}.cap{margin-bottom:14px}.cap__head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:2px}.can{margin:4px 0 18px;border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;background:var(--surface)}.can summary{font-weight:500}.can h3{font-size:.8125rem;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:12px 0 4px}.can ul{margin:4px 0 4px 20px;font-size:.875rem}.ask{display:flex;gap:8px;align-items:center;padding-top:8px}.ask input{flex:1;font:inherit;font-size:.875rem;padding:10px 18px;border:1.5px solid var(--border);border-radius:var(--pill);background:var(--bg);color:var(--text)}
+.ask input:focus{outline:none;border-color:var(--accent)}.ask .btn{font-size:.8125rem;padding:9px 20px}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px;margin-right:8px}@keyframes s{to{transform:rotate(360deg)}}
+@media (max-width:640px){.nav .container{gap:8px}.who{display:none}.tab-btn{padding:0 8px}.hero h1{font-size:1.5rem}.brand small{display:none}}
+</style></head><body>
+<header class="nav"><div class="container">
+  <a class="brand" href="#trainer">
+    <svg width="40" height="26" viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <g transform="rotate(-30 20 18)"><rect x="3" y="9" width="34" height="18" rx="9"/><path d="M20 9v18"/><path d="M8 14.5c1-1.8 3-2.8 5-2.8" opacity=".5"/></g>
+      <path d="M40 18h13M47 11l7 7-7 7"/>
+    </svg>NBA Studio<small>GLUCOREN</small></a>
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="trainer">Trainer</button>
+    <button class="tab-btn" data-tab="recommender">Recommender</button>
+  </nav>
+  <a href="/#admin" target="nba-admin" class="adminlink" id="tabAdmin" title="Admin" aria-label="Admin" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+  <div class="who">__WHO__</div>
+</div></header>
+
+<main class="container">
+<!-- ============================ WORKFLOW ============================ -->
+<section id="tab-trainer" class="tab active">
+  <div class="hero"><h1>Trainer</h1>
+    <p>The Trainer agent keeps the recommendations current. Each week we record what was done for each HCP (a call, an email, a digital touch, or nothing) and then measure the outcome, the number of new prescriptions they wrote in the following two weeks. The Trainer checks whether the model has learned from the most recent weeks of those results, decides whether to retrain the model and whether to republish the recommendations, and shows its work. What it publishes is what the <a href="#recommender">Recommender</a> answers from.</p></div>
+  <div class="sect" id="status"><span class="mute"><span class="spin"></span>Loading status...</span></div>
+
+  <div class="sect"><h2>Run Trainer</h2>
+    <div class="runrow">
+      <div class="runleft"><div class="modes">
+          <label class="mode"><input type="radio" name="mode" value="stepper" checked><span class="mname">Manual</span><span class="mdesc">stops at each gate</span></label>
+          <label class="mode"><input type="radio" name="mode" value="auto"><span class="mname">Auto</span><span class="mdesc">runs as scheduled</span></label></div>
+        <div class="gates"><p><svg class="gico" viewBox="0 0 22 22" width="22" height="22" aria-hidden="true"><path d="M3.5 20V10a7.5 7.5 0 0 1 15 0v10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><text x="11" y="16" text-anchor="middle" font-size="9" fill="currentColor" font-family="inherit">1</text></svg><span class="gtxt">Retrain: Retrains the model only if at least <span id="minWeeks">2</span> new weeks of outcomes have arrived. Otherwise it keeps the current model.</span></p>
+          <p><svg class="gico" viewBox="0 0 22 22" width="22" height="22" aria-hidden="true"><path d="M3.5 20V10a7.5 7.5 0 0 1 15 0v10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><text x="11" y="16" text-anchor="middle" font-size="9" fill="currentColor" font-family="inherit">2</text></svg><span class="gtxt">Publish: Tests the business rules without saving, compares the result with what is published, and publishes only if something changed.</span></p></div></div>
+      <div class="runbtns"><button id="btnPrev" class="btn btn--secondary">Preview</button><button id="btnRun" class="btn btn--secondary btn--outline">Run Trainer</button></div></div>
+    <div id="prev"></div><div id="runMsg" class="mute" style="margin-top:8px"></div></div>
+
+  <div class="sect"><div class="sect__head" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Watch Logs</h2></div><div id="trace" class="mute">No run yet. Press <b>Run Trainer</b>.</div></div>
+
+  <div class="sect"><h2>Browse Data</h2>
+    <div class="dtools"><button id="btnAll" class="btn btn--secondary btn--sm">Expand all</button></div>
+    <div id="ds" class="mute">Loading...</div></div>
+
+</section>
+
+<!-- ================================ ASK ================================ -->
+<section id="tab-recommender" class="tab">
+  <div class="split">
+    <div class="main">
+      <div class="hero"><h1>Recommender</h1>
+    <p>The Recommender agent answers questions about what the <a href="#trainer">Trainer</a> publishes: who to contact, through which channel, and why. It reads only the recommendation table, cannot change anything, and never writes its own product claims; messages come from pre-approved wording. For questions its fixed lookups do not cover, such as counts or comparisons, it writes a read-only query; the SQL is shown under the answer.</p></div>
+      <div class="card chatcard">
+        <div class="chathead"><button type="button" class="iconbtn" id="clearChat" title="Clear chat" aria-label="Clear chat" style="visibility:hidden"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></div>
+        <div class="chat" id="chat"></div>
+        <form class="ask" id="askForm"><input id="q" maxlength="1000" autocomplete="off" placeholder="e.g. Who are the top 5 HCPs to call this week?"><button class="btn btn--primary" id="btnAsk" type="submit">Ask</button></form>
+      </div>
+    </div>
+    <aside class="side"><div class="card sidecard">
+      <div class="cap"><div class="cap__head"><span class="pill blue">Look up</span><span class="mute">Fixed, verified lookups</span></div><ul class="sug" id="starters-lookup"></ul></div>
+      <div class="cap"><div class="cap__head"><span class="pill blue">Analyze</span><span class="mute">Live read-only query; SQL shown</span></div><ul class="sug" id="starters-sql"></ul></div>
+      <div class="can cap open" id="hints">
+        <button type="button" class="cap__head canhead" id="hintsToggle" aria-expanded="true"><span class="pill blue">Helpful hints</span><span class="mute">Recommender capabilities</span><span class="chev" aria-hidden="true">&#9656;</span></button>
+        <div class="can__body">
+          <h3>Look up (fixed)</h3>
+          <ul><li>Top HCPs, by channel or segment</li><li>Why one HCP was recommended</li><li>An HCP's pre-approved message</li><li>Contacts by channel and by segment</li><li>How the model was validated, and its caveats</li></ul>
+          <h3>Analyze (live SQL)</h3>
+          <ul><li>Counts, averages and comparisons across the data below, such as "How many Endocrinologists in the South are on the contact list?"</li></ul>
+          <h3>Data it can see</h3>
+          <ul><li><b>Recommendations:</b> channel, rank, score, segment, message, compliance</li><li><b>HCP attributes:</b> specialty, region, state, years in practice, payer mix, email consent</li></ul>
+          <h3>What it will not do</h3>
+          <ul><li>See other data, change anything, or write its own product claims</li></ul>
+        </div>
+      </div>
+    </div></aside>
+  </div>
+</section>
+
+<!-- ================================ ADMIN ================================ -->
+<section id="tab-admin" class="tab">
+  <div class="hero"><a href="/#trainer" target="nba-trainer" class="backlink">&larr; Trainer</a><h1>Admin</h1>
+    <p>Prepare demo scenarios by making small, reversible changes to the source data, then run the <a href="#trainer">Trainer</a> to see how the workflow reacts. Only people who can change things see this tab. Reset restores production.</p></div>
+  <div class="sect" id="demoCard"><h2>Demo data</h2><p class="sub">Change the source data so a different part of the workflow triggers.</p>
+    <div class="grid" id="opts"></div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px">
+      <button id="btnReset" class="btn btn--danger btn--sm">Reset to production</button><span id="active" class="mute"></span></div>
+    <div id="injMsg" class="mute" style="margin-top:8px"></div></div>
+</section>
+
+</main>
+
+<script>
+const $=s=>document.querySelector(s);let RUN=null,POLL=null,OPTS=null,RUNLIVE=null,LASTWAIT='',RECHECKED='';const SEL={A:null,B:null,C:null,E:4};
+const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+async function api(path,body){const o=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
+ const r=await fetch(path,o);if(r.status===401){location='/login';return new Promise(()=>{})}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+function say(id,msg,bad){const e=$(id);e.textContent=msg;e.className=bad?'err':'mute'}
+/* ---- safe mini markdown for chat answers (escape first, then format) ---- */
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function inl(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`(.+?)`/g,'<code>$1</code>')}
+function md(t){const L=String(t).split('\n');let h='',i=0;
+ while(i<L.length){const l=L[i];
+  if(/^\s*\|/.test(l)){const R=[];while(i<L.length&&/^\s*\|/.test(L[i])){R.push(L[i]);i++}
+   const cells=r=>r.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim());const sep=r=>/^\s*\|?[\s:\-|]+\|?\s*$/.test(r)&&/-/.test(r);
+   const head=cells(R[0]);const body=R.slice(sep(R[1]||'')?2:1);
+   h+='<table><tr>'+head.map(c=>'<th>'+inl(c)+'</th>').join('')+'</tr>'+body.map(r=>'<tr>'+cells(r).map(c=>'<td>'+inl(c)+'</td>').join('')+'</tr>').join('')+'</table>';continue}
+  if(/^\s*[*-]\s+/.test(l)){h+='<ul>';while(i<L.length&&/^\s*[*-]\s+/.test(L[i])){h+='<li>'+inl(L[i].replace(/^\s*[*-]\s+/,''))+'</li>';i++}h+='</ul>';continue}
+  if(l.trim()==='')h+='';else h+='<p>'+inl(l)+'</p>';i++}
+ return h}
+/* ---- tabs ---- */
+let OPERATOR=false;
+let OPKNOWN=false;
+function setOperator(o){OPERATOR=!!o;OPKNOWN=true;$('#tabAdmin').hidden=!OPERATOR}
+function showTab(n){if(['control','workflow','data'].includes(n))n='trainer';if(n==='ask')n='recommender';let keep=false;if(n==='admin'&&!OPERATOR){keep=!OPKNOWN;n='trainer'}if(!['trainer','recommender','admin'].includes(n))n='trainer';
+ document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id==='tab-'+n));
+ document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===n));$('#tabAdmin').classList.toggle('active',n==='admin');
+ CURTAB=n;chrome();
+ if(!keep&&location.hash!=='#'+n)history.replaceState(null,'','#'+n)}
+document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+/* ---- status ---- */
+async function loadState(quiet){try{const s=await api('/api/state');setOperator(s.operator);attachRun(s.active_run);$('#minWeeks').textContent=s.rules.min_new_weeks;{const bz=s.busy&&/still running/.test(s.busy)?s.busy.replace(/^'(\w+)' is still running$/,'$1 is still running'):null;const im=$('#injMsg');if(bz&&!im.textContent)say('#injMsg','Working: '+bz+'.');else if(!bz&&/^Working: /.test(im.textContent))say('#injMsg','')}if(location.hash==='#admin')showTab('admin');const st=s.state,p=s.published,n=st.new_outcome_weeks,min=s.rules.min_new_weeks;
+ let cls='ok',head='Model up to date',sub='The model has seen the latest outcomes.';
+ if(n>=min){cls='bad';head='Model stale: '+n+' new outcome weeks';sub='Gate 1 will retrain the model.'}
+ else if(n===1){cls='warn';head='Model has 1 new outcome week';sub='Below the retrain rule of '+min+' weeks, so the model is kept.'}
+ if(RUNLIVE){[cls,head,sub]=runLine(RUNLIVE)}
+ const c=$('#status');c.innerHTML='';c.append(el('h2','','Check Model Status'));const row=(k,hd,sb)=>{const r=el('div','status');r.append(el('span','dot '+k));const d=el('div','statusline');d.append(el('div','head',hd),el('div','mute',sb));r.append(d);return r};
+ c.append(row(cls,head,sub));const rc=s.recs||{};if(!RUNLIVE&&rc.status==='pending')c.append(row('warn','Recommendations have pending changes','Source data changed after the last publish ('+rc.published_at+' UTC). Preview shows what would change.'));
+ else if(!RUNLIVE&&rc.status==='current')c.append(row('ok','Recommendations current','Published '+rc.published_at+' UTC.'));
+ const f=el('div','facts');[['Model',st.layer1_model_version],['Trained through',st.model_cutoff],['Latest outcomes',st.latest_outcome_week],
+  ['Published contacts',p.contacts+'  ('+p.call+' call · '+p.email+' email · '+p.digital+' digital)'],['Compliance',p.compliance_failures+' failures'+(p.withheld?' · '+p.withheld+' withheld':'')]]
+  .forEach(([k,v])=>{const x=el('div','fact');x.append(el('span','',k),el('b','',v));f.append(x)});c.append(f);
+ const dm=s.demo,bits=dm.changes.map(x=>rom(x.option)+(x.hcp_id&&x.hcp_id!=='-'?' '+x.hcp_id:''));dm.overrides.forEach(()=>bits.push('III wording override'));
+ $('#active').textContent=bits.length?'Changes in progress: '+bits.join(', '):'No changes in progress (production data).';if(bits.length){const nt=el('div','demoNote','Changes in progress: '+bits.join(', ')+'. ');if(OPERATOR){const a=el('a','','Manage in Admin');a.href='/#admin';a.target='nba-admin';nt.append(a)}c.append(nt)}chrome()}catch(e){if(quiet===true&&$('#status .facts'))return;$('#status').textContent='Could not load status: '+e.message}}
+/* ---- demo options (chips) ---- */
+function chipGroup(items,key,onPick){const g=el('div','chips');items.forEach(it=>{const c=el('button','chip'+(SEL[key]===it.value?' selected':''),it.label);c.type='button';
+ c.onclick=()=>{SEL[key]=it.value;g.querySelectorAll('.chip').forEach(x=>x.classList.remove('selected'));c.classList.add('selected');if(onPick)onPick(it)};g.append(c)});return g}
+const ROMAN={A:'I',B:'II',C:'III',E:'IV'};const rom=k=>ROMAN[k]||k;
+async function loadOpts(quiet){try{OPTS=await api('/api/options');const g=$('#opts');g.innerHTML='';
+ const card=(k,o,chips,label,extra)=>{const c=el('div','opt');const h=el('h3','',String(o.title).replace(/^([ABCE])\./,(m,l)=>rom(l)+'.'));h.append(el('span','pill blue',o.layer));c.append(h,el('p','',o.what),el('p','expect','Expect: '+o.expect),chips);if(extra)c.append(extra);
+  const b=el('button','btn btn--secondary btn--outline btn--sm',label||'Apply');b.onclick=()=>inject(k,b);c.append(b);g.append(c)};
+ const cand=a=>a.map(x=>({value:x.hcp_id,label:x.hcp_id+' · rank '+x.priority_rank+' · '+x.segment}));
+ if(!SEL.A||!OPTS.A.candidates.some(x=>x.hcp_id===SEL.A))SEL.A=OPTS.A.candidates[0]&&OPTS.A.candidates[0].hcp_id;
+ if(!SEL.B||!OPTS.B.candidates.some(x=>x.hcp_id===SEL.B))SEL.B=OPTS.B.candidates[0]&&OPTS.B.candidates[0].hcp_id;
+ if(!SEL.C)SEL.C=OPTS.C.channels[0].channel;
+ card('A',OPTS.A,chipGroup(cand(OPTS.A.candidates),'A'));card('B',OPTS.B,chipGroup(cand(OPTS.B.candidates),'B'));
+ card('C',OPTS.C,chipGroup(OPTS.C.channels.map(x=>({value:x.channel,label:x.channel+' · '+x.contacts+' contacts'})),'C'));
+ const cut=el('p','mute');const upd=()=>{const x=OPTS.E.choices.find(y=>y.weeks_back===SEL.E);cut.textContent=x?'Model would be trained only through '+x.model_cutoff+'. Gate 1: '+x.gate1+'.':''};
+ card('E',OPTS.E,chipGroup(OPTS.E.choices.map(x=>({value:x.weeks_back,label:x.weeks_back+' unseen wk · '+x.gate1})),'E',upd),'Apply (retrains, about 1 min)',cut);upd()}
+ catch(e){if(quiet===true&&$('#opts .opt'))return;say('#injMsg','Could not load options: '+e.message,true)}}
+async function inject(k,btn){const body={option:k};if(k==='A')body.hcp_id=SEL.A;if(k==='B')body.hcp_id=SEL.B;if(k==='C')body.channel=SEL.C;if(k==='E')body.weeks_back=+SEL.E;
+ btn.disabled=true;say('#injMsg','Applying...');try{const r=await api('/api/inject',body);if(r.task){await waitTask(r.task)}else{say('#injMsg',r.summary)}await loadState();loadData();$('#prev').innerHTML='';await loadOpts();tellOthers()}catch(e){say('#injMsg',e.message,true)}btn.disabled=false}
+async function waitTask(id){say('#injMsg','Working...');for(;;){const t=await api('/api/task/'+id);if(t.status==='done'){say('#injMsg',(t.summary&&t.summary.summary)||'Done.');return}
+ if(t.status==='failed')throw new Error(t.error);await new Promise(r=>setTimeout(r,2000))}}
+$('#btnReset').onclick=async()=>{if(!confirm('Reset all demo changes and restore production?'))return;const b=$('#btnReset');b.disabled=true;say('#injMsg','Resetting to production...');
+ try{const r=await api('/api/reset',{});await waitTask(r.task);await loadState();loadData();await loadOpts();$('#prev').innerHTML='';tellOthers()}catch(e){say('#injMsg',e.message,true)}b.disabled=false};
+/* ---- preview ---- */
+$('#btnPrev').onclick=async()=>{const b=$('#btnPrev');b.disabled=true;const p=$('#prev');p.innerHTML='<p class="mute" style="margin-top:16px"><span class="spin"></span>Dry-running both gates (nothing is published)...</p>';
+ try{const r=await api('/api/preview',{});p.innerHTML='';const t=el('div','tiles');
+  const tile=(lbl,g)=>{const x=el('div','tile');const h=el('b','',lbl+'  ');h.append(el('span','pill '+(g.decision==='RUN'||g.decision==='RETRAIN'?'warn':'ok'),g.decision));x.append(h,el('p','',g.reason));return x};
+  t.append(tile('Layer 1',r.gate1),tile('Layer 2',r.gate2));p.append(t);
+  if(r.gate2.decision==='SKIP'){const np=el('p','mute','Nothing would change.');if(OPERATOR){np.append(' For experimentation, see ');const a=el('a','','Admin');a.href='/#admin';a.target='nba-admin';np.append(a,'.')}p.append(np)}}catch(e){p.innerHTML='';p.append(el('div','err',e.message))}b.disabled=false};
+/* ---- run + live trace ---- */
+$('#btnRun').onclick=async()=>{const mode=document.querySelector('input[name=mode]:checked').value;try{const r=await api('/api/run',{mode,narrate:true});RUN=r.run_id;$('#trace').innerHTML='<span class="spin"></span>Starting...';$('#runMsg').textContent='';poll()}catch(e){if(/paused|in progress|still running/.test(e.message)){say('#runMsg','A run is already active: '+e.message+' ',false);const a=el('a','','Show it');a.href='#';a.onclick=x=>{x.preventDefault();loadState().then(()=>{try{$('#trace').closest('.sect').scrollIntoView({behavior:'smooth',block:'start'})}catch(z){}})};$('#runMsg').append(a)}else say('#runMsg',e.message,true)}};
+function poll(){clearInterval(POLL);POLL=setInterval(async()=>{try{const v=await api('/api/run/'+RUN);render(v);if(['done','attention','failed','aborted'].includes(v.status)){clearInterval(POLL);loadState();loadData();loadOpts();tellOthers()}}catch(e){}},1500)}
+const IC={done:'✓',skipped:'–',superseded:'↻',attention:'!',failed:'✕',running:'…'};
+function runLine(v){return v.status==='waiting'?['warn','Paused at '+(v.waiting&&v.waiting.key==='gate1'?'Gate 1':v.waiting&&v.waiting.key==='gate2'?'Gate 2':'a gate'),'Press Continue in Watch Logs below.']:['run','Run in progress','See Watch Logs for each step.']}
+let CURTAB='trainer';
+function chrome(){const nm={trainer:'Trainer',recommender:'Recommender',admin:'Admin'}[CURTAB]||'Trainer';document.title=((RUNLIVE&&RUNLIVE.status==='waiting')?'Paused · ':'')+nm+' · NBA Studio'}
+function paintRunLine(){const rows=document.querySelectorAll('#status .status');if(!rows.length||!RUNLIVE)return;const r=runLine(RUNLIVE),d=rows[0].querySelector('.statusline');rows[0].querySelector('.dot').className='dot '+r[0];d.children[0].textContent=r[1];d.children[1].textContent=r[2];for(let i=1;i<rows.length;i++)rows[i].style.display='none'}
+async function attachRun(id){if(!id||id===RUN)return;RUN=id;try{render(await api('/api/run/'+id))}catch(e){}poll()}
+function render(v){RUNLIVE=(v.status==='running'||v.status==='waiting')?v:null;chrome();paintRunLine();const t=$('#trace');t.innerHTML='';t.className='';
+ const head=el('div');head.style.cssText='display:flex;gap:12px;align-items:center;margin-bottom:8px';
+ head.append(el('span','pill '+(v.status==='done'?'ok':(v.status==='attention'||v.status==='failed')?'bad':v.status==='waiting'?'warn':'mu'),v.status==='attention'?'NEEDS ATTENTION':v.status.toUpperCase()),el('span','mute','mode: '+(v.mode==='stepper'?'manual':v.mode)+' · '+v.elapsed+'s'));t.append(head);
+ const tl=el('div','timeline');
+ if(v.waiting){const wk=v.id+':'+v.waiting.key;if(LASTWAIT!==wk){LASTWAIT=wk;setTimeout(()=>{try{$('#trace').closest('.sect').scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}},50)}}
+ v.steps.forEach(s=>{const r=el('div','step');r.append(el('div','ic '+s.status,IC[s.status]||'?'));const c=el('div');const tt=el('div','t',s.title);if(s.seconds!=null)tt.append(el('small','','  '+s.seconds+'s'));c.append(tt);
+  c.append(el('div','r',s.reason||''));if(s.narration)c.append(el('div','n',s.narration));
+  const f=s.facts||{};if(f.examples&&f.examples.length){const tb=el('table');tb.innerHTML='<tr><th>HCP</th><th>Before</th><th>After</th><th>Why</th></tr>';f.examples.forEach(e=>{const tr=el('tr');[e.hcp_id,e.before,e.after,e.why].forEach(x=>tr.append(el('td','',x==null?'':x)));tb.append(tr)});c.append(tb)}
+  if(Object.keys(f).length){const d=el('details');d.append(el('summary','','details'),el('pre','',JSON.stringify(f,(k,x)=>k==='examples'?undefined:x,1)));c.append(d)}
+  r.append(c);tl.append(r)});t.append(tl);
+ if(v.waiting){const g=el('div','gate');const msg=el('div','',v.waiting.prompt);
+  if(v.waiting.key==='gate2'&&OPERATOR&&/skipped/i.test(v.waiting.prompt)){msg.append(' For experimentation, see ');const a=el('a','','Admin');a.href='/#admin';a.target='nba-admin';msg.append(a,'.')}
+  g.append(msg);if(RECHECKED===v.id+':'+v.waiting.key)g.append(el('p','mute','Re-checked after your change.'));
+  const row=el('div');row.style.cssText='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap';
+  const lab={continue:'Continue',abort:'Abort'};
+  v.waiting.options.filter(o=>lab[o]).forEach(o=>{const b=el('button','btn btn--sm '+(o==='continue'?'btn--secondary btn--outline':'btn--danger'),lab[o]);b.onclick=async()=>{b.disabled=true;try{await api('/api/run/'+v.id+'/control',{action:o})}catch(e){}};row.append(b)});g.append(row);t.append(g)}
+ if(v.verify){const d=el('div');d.style.marginTop='12px';d.append(el('b','','Verification: '));d.append(el('span','pill '+(v.verify.status==='PASS'?'ok':'bad'),v.verify.status==='PASS'?'PASS':'NEEDS ATTENTION'));
+  const ul=el('ul','checks');v.verify.checks.forEach(c=>{const li=el('li');li.append(el('span',c.ok?'y':'x',c.ok?'✓ ':'✕ '),document.createTextNode(c.name+' — '+c.detail));ul.append(li)});d.append(ul);t.append(d)}
+ if(v.before&&v.after){const tb=el('table');tb.innerHTML='<tr><th></th><th>Model</th><th>Contacts</th><th>Call</th><th>Email</th><th>Digital</th><th>Substituted</th><th>Compliance failures</th></tr>';
+  [['Before',v.before],['After',v.after]].forEach(([n,x])=>{const tr=el('tr');[n,x.model_version,x.contacts,x.call,x.email,x.digital,x.substituted,x.compliance_failures].forEach(y=>tr.append(el('td','',y)));tb.append(tr)});t.append(tb)}
+ if(v.report){const d=el('div');d.style.marginTop='14px';d.append(el('b','','Report'),el('pre','',v.report));t.append(d)}
+ if(v.error)t.append(el('div','err',v.error))}
+/* ---- ask (chat) ---- */
+const LOOKUPS=[['Who are the top 5 HCPs to call this week?','Shows the five highest-priority HCPs recommended for a rep call.'],
+ ['Why was the #1 HCP recommended?','Explains the top HCP\'s channel, rank and rationale.'],
+ ['What is the approved message for the top HCP?','Returns the pre-approved wording only. Nothing is written freehand.'],
+ ['How many contacts are there by channel?','Counts contacts by call, email and digital, and how many were switched by contact limits or consent.'],
+ ['How much lift should I expect?','Explains the caveats: scores rank HCPs, they do not forecast prescriptions.']];
+const ANALYZE=[['How many Movers have email consent?','Writes a live query that counts HCPs in the Movers segment with email consent.'],
+ ['Compare contacts by channel for each region','Writes a live query that breaks contacts down by region and channel.'],
+ ['Which specialty has the most HCPs on the contact list?','Writes a live query that ranks specialties by number of contacts.']];
+function starters(list,id){list.forEach(([q,hint])=>{const li=el('li');const b=el('button','sug__btn',q);b.type='button';b.setAttribute('data-hint',hint);
+ b.onclick=()=>{$('#q').value=q;$('#askForm').requestSubmit()};li.append(b);$(id).append(li)})}
+starters(LOOKUPS,'#starters-lookup');starters(ANALYZE,'#starters-sql');
+const ICON_COPY='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',ICON_OK='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>';
+$('#askForm').onsubmit=async e=>{e.preventDefault();const q=$('#q').value.trim();if(!q)return;const chat=$('#chat');
+ chat.append(el('div','msg me',q));$('#clearChat').style.visibility='visible';$('#q').value='';const w=el('div','msg bot');w.innerHTML='<span class="spin"></span>Thinking...';chat.append(w);chat.scrollTop=chat.scrollHeight;$('#btnAsk').disabled=true;
+ try{const r=await api('/api/ask',{question:q});w.innerHTML=md(r.answer||'(no answer)');if(r.sql){const d=el('details','sqlbox');d.append(el('summary','','SQL used'+(r.sql_rows!=null?' · '+r.sql_rows+(r.sql_rows===1?' row':' rows'):'')));const pre=el('pre','',r.sql);const cb=el('button','iconbtn');cb.type='button';cb.title='Copy SQL';cb.setAttribute('aria-label','Copy SQL');cb.innerHTML=ICON_COPY;cb.onclick=async()=>{try{await navigator.clipboard.writeText(r.sql);cb.innerHTML=ICON_OK;cb.title='Copied'}catch(e){cb.title='Copy failed'}setTimeout(()=>{cb.innerHTML=ICON_COPY;cb.title='Copy SQL'},1500)};const sw=el('div','sqlwrap');sw.append(pre,cb);d.append(sw);w.append(d)}}catch(err){w.textContent='Sorry: '+err.message}
+ $('#btnAsk').disabled=false;chat.scrollTop=chat.scrollHeight};
+$('#hintsToggle').onclick=()=>{const o=$('#hints').classList.toggle('open');$('#hintsToggle').setAttribute('aria-expanded',o)};
+$('#clearChat').onclick=()=>{$('#chat').innerHTML='';$('#clearChat').style.visibility='hidden';$('#q').focus()};
+/* ---- datasets ---- */
+const GRP=n=>n.startsWith('raw_')?['Source data','blue']:n.startsWith('ref_')?['Reference','blue']:['features','uplift_train'].includes(n)?['Features','blue']:
+ ['recommendations','recommendations_final'].includes(n)||n.startsWith('v_')?['Recommendations','ok']:['Other','blue'];
+const TBLCACHE={};let TBLROWS=[];
+function updateAllBtn(){const b=$('#btnAll');if(!b||b.disabled)return;b.textContent=(TBLROWS.length&&TBLROWS.every(r=>!r.sub.hidden))?'Collapse all':'Expand all'}
+let LASTSIG='';
+async function loadData(quiet){const d=$('#ds');try{const rows=await api('/api/datasets');const sig=JSON.stringify(rows);if(quiet===true&&sig===LASTSIG)return;LASTSIG=sig;Object.keys(TBLCACHE).forEach(k=>delete TBLCACHE[k]);TBLROWS=[];
+ const tb=el('table','dt');tb.innerHTML='<tr><th></th><th>Table</th><th>Group</th><th>Rows</th><th>Last modified (UTC)</th></tr>';
+ rows.forEach(x=>{const g=GRP(x.table_id);const tr=el('tr','tblrow');tr.tabIndex=0;tr.setAttribute('aria-expanded','false');tr.title='Show 5 sample rows';
+  const c0=el('td');c0.append(el('span','chev','▸'));tr.append(c0,el('td','',x.table_id));const c=el('td');c.append(el('span','pill '+g[1],g[0]));
+  tr.append(c,el('td','',Number(x.row_count).toLocaleString()),el('td','',x.last_modified));
+  const sub=el('tr','sub');sub.hidden=true;const sc=el('td');sc.colSpan=5;sub.append(sc);
+  const r={name:x.table_id,tr,sub,cell:sc};TBLROWS.push(r);
+  const toggle=()=>toggleTable(r);tr.onclick=toggle;tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
+  tb.append(tr,sub)});
+ d.innerHTML='';d.className='';d.append(tb);updateAllBtn()}catch(e){d.textContent=e.message}}
+function closeTable(r){r.sub.hidden=true;r.tr.classList.remove('open');r.tr.setAttribute('aria-expanded','false');updateAllBtn()}
+function toggleTable(r){if(r.sub.hidden)openTable(r);else closeTable(r)}
+async function openTable(r){const name=r.name,cell=r.cell;r.sub.hidden=false;r.tr.classList.add('open');r.tr.setAttribute('aria-expanded','true');updateAllBtn();
+ if(TBLCACHE[name]){cell.innerHTML='';cell.append(TBLCACHE[name]);return}
+ cell.innerHTML='<span class="mute"><span class="spin"></span>Loading sample rows...</span>';
+ try{const x=await api('/api/table?name='+encodeURIComponent(name));const box=el('div');const n=x.rows.length;
+  const cap=el('div','mute',(n?n+(n===1?' sample row':' sample rows'):'No rows')+(x.note?' · '+x.note:''));cap.style.margin='8px 0 0';box.append(cap);
+  if(x.columns.length){const w=el('div','minis');const t=el('table','mini');const hr=el('tr');x.columns.forEach(c=>hr.append(el('th','',c)));t.append(hr);
+   x.rows.forEach(row=>{const y=el('tr');row.forEach(v=>y.append(el('td','',v==null?'':v)));t.append(y)});w.append(t);box.append(w)}
+  TBLCACHE[name]=box;cell.innerHTML='';cell.append(box)}catch(e){cell.innerHTML='';cell.append(el('div','err',e.message))}}
+$('#btnAll').onclick=async()=>{const b=$('#btnAll');if(!TBLROWS.length)return;
+ if(TBLROWS.every(r=>!r.sub.hidden)){TBLROWS.forEach(closeTable);return}
+ b.disabled=true;b.innerHTML='<span class="spin"></span>Opening...';
+ const todo=TBLROWS.filter(r=>r.sub.hidden);let i=0;
+ const worker=async()=>{while(i<todo.length){const r=todo[i++];await openTable(r)}};
+ await Promise.all([worker(),worker(),worker()]);b.disabled=false;updateAllBtn()};
+
+if(!window.name)window.name='nba-trainer';
+let LASTFOCUS=0;function refreshNow(){LASTFOCUS=Date.now();loadState(true);loadData(true);if(!OPTS_BUSY())loadOpts(true)}
+function refreshOnFocus(e){if(e&&e.type==='visibilitychange'&&document.hidden)return;if(Date.now()-LASTFOCUS<3000)return;refreshNow()}
+let BC=null;try{if('BroadcastChannel' in window)BC=new BroadcastChannel('nba-studio')}catch(e){}
+function tellOthers(){try{if(BC)BC.postMessage({t:'changed'})}catch(e){}}
+function recheckIfPaused(){if(RUNLIVE&&RUNLIVE.status==='waiting'&&RUNLIVE.waiting&&RUNLIVE.waiting.key==='gate2'){const key=RUN+':gate2';api('/api/run/'+RUN+'/control',{action:'recheck'}).then(()=>{RECHECKED=key}).catch(()=>{})}}
+if(BC)BC.onmessage=m=>{if(m.data&&m.data.t==='changed'){if(Date.now()-LASTFOCUS>800)refreshNow();recheckIfPaused()}};
+function OPTS_BUSY(){return !!document.querySelector('#opts button:disabled')}
+window.addEventListener('focus',refreshOnFocus);document.addEventListener('visibilitychange',refreshOnFocus);
+window.addEventListener('hashchange',()=>showTab(location.hash.slice(1)));showTab((location.hash||'#trainer').slice(1));loadState();loadOpts();loadData();
+</script></body></html>

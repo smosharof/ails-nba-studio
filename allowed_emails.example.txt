@@ -1,0 +1,4 @@
+# One Google account per line: the people who may sign in to the deployed console and Recommender.
+# Copy this file to allowed_emails.txt (git-ignored) and replace the examples. Blank lines and '#' lines are ignored.
+teammate1@example.edu
+teammate2@example.edu
