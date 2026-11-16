@@ -11,5 +11,5 @@ outputs/
 # The real sign-in list: copy allowed_emails.example.txt instead.
 allowed_emails.txt
 
-# Optional: who may change things (everyone else can only view).
+# (The operator list also lives in Secret Manager now; this is only a scratch-file name.)
 operator_emails.txt

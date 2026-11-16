@@ -293,7 +293,7 @@ Always run with `python3 -I` (isolated mode). Scripts read BigQuery and call Gem
 
 | Resource         | Name                                    | Notes                                                                                       |
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Agent 2 service | `nba-agent2`                          | **Public URL, gated by Sign in with Google** (allowlist in `allowed_emails.txt`); read-only service account; 2 instances max |
+| Agent 2 service | `nba-agent2`                          | **Public URL, gated by Sign in with Google** (allowlist in the Secret Manager secret `nba-allowed-emails`); read-only service account; 2 instances max |
 | Agent 1 job      | `nba-agent1`                          | 2 CPU, 2 GiB, 15 minute timeout, no retries                                                 |
 | Console service | `nba-console`                         | **Public URL, gated by Sign in with Google** (same allowlist; sessions last 1 hour); every change is audited; 1 instance max |
 | Schedule         | `nba-agent1-weekly`                   | Mondays 06:00 New York, **paused**; resume it to enable weekly runs                   |
@@ -304,13 +304,13 @@ Always run with `python3 -I` (isolated mode). Scripts read BigQuery and call Gem
 
 Agent 2 can be opened from a browser by a short allowlist of people. Cloud Run's built-in IAP could not be completed for this project (it has no Google organization and IAP returned an OAuth-client error), so the app has its own sign-in, `webauth.py`, and Cloud Run allows unauthenticated *network* access while the app enforces login.
 
-- **Who:** only the emails in `allowed_emails.txt`. While the Google OAuth app is in *Testing* mode, Google additionally only lets its listed test users sign in (a second, independent gate).
+- **Who:** only the emails in the secret `nba-allowed-emails`. While the Google OAuth app is in *Testing* mode, Google additionally only lets its listed test users sign in (a second, independent gate).
 - **How it works:** authorization-code flow with a signed one-time `state` cookie and a `nonce`; the ID token is validated by Google, then the audience, issuer, verified email, nonce and allowlist are checked; the session is an HMAC-signed, HttpOnly, Secure cookie that expires in 2 hours. All routes except the sign-in flow need a session, and state-changing requests must be JSON from our own origin. Each user is limited to 20 questions per 10 minutes. Sign-in codes are never logged. If sign-in is not fully configured the service serves nothing.
 - **Secrets:** the OAuth client secret (`nba-oauth-client-secret`) and the cookie signing key (`nba-session-key`) are in Secret Manager and are never in the code or the logs.
 - **Tests:** `python3 -I test_webauth.py` runs 45 attack checks (forged, tampered and expired cookies, wrong audience or nonce, unverified or non-allowlisted emails, cross-site posts, oversized bodies, rate abuse). Run it after any change to `webauth.py` or `agent2.py`.
 - **Deploy:** `NBA_OAUTH_CLIENT_ID=<client id> ./07_deploy.sh agent2-public`. To make it private again, run `./07_deploy.sh agent2`, which also removes the public permission so a leftover grant can never expose a build that has no login.
-- **Adding or removing people:** edit `allowed_emails.txt`, add or remove them as test users under Google Auth Platform, then redeploy with `agent2-public`.
-- **The console is public too, but it is the riskier service.** It can change data and run retrains, so it adds protections beyond Agent 2: every page and data call needs sign-in; sessions are scoped to the console (an Agent 2 cookie does not work) and last 1 hour; every change-making request must be same-origin JSON, is limited to 60 per 10 minutes per person, and is written to `run_log` with the person's email (`agent = 'console'`); an optional `operator_emails.txt` lets only those people change things while the rest can view. `python3 -I test_console_auth.py` runs 92 attack checks, including the chat and table previews, and `python3 -I test_table_preview.py` runs 36 more on the preview function itself. To make it private again run `./07_deploy.sh console`.
+- **Adding or removing people:** the project owner runs `./07_deploy.sh allowlist set <file>` (one address per line; see `allowed_emails.example.txt`), adds or removes them as test users under Google Auth Platform, then redeploys (`agent2-public` or `console-public`). `./07_deploy.sh allowlist show` lists the current people.
+- **The console is public too, but it is the riskier service.** It can change data and run retrains, so it adds protections beyond Agent 2: every page and data call needs sign-in; sessions are scoped to the console (an Agent 2 cookie does not work) and last 1 hour; every change-making request must be same-origin JSON, is limited to 60 per 10 minutes per person, and is written to `run_log` with the person's email (`agent = 'console'`); an optional secret `nba-operator-emails` (`./07_deploy.sh operators set <file>`) lets only those people change things while the rest can view. `python3 -I test_console_auth.py` runs 97 attack checks, including the chat and table previews, and `python3 -I test_table_preview.py` runs 36 more on the preview function itself. To make it private again run `./07_deploy.sh console`.
 - **Known limits:** the rate limit is per instance (two instances at most); Testing-mode apps show Google's "unverified app" warning on first sign-in.
 
 ---
@@ -475,7 +475,7 @@ The scenario controls (I frequency cap, II consent withdrawal, III compliance gu
 
 1. Log in with `gcloud auth login` using their own account (`07_deploy.sh` and `common.py` use the active login; `NBA_ACCOUNT` overrides it).
 2. Export `NBA_OAUTH_CLIENT_ID` (ask the owner for it).
-3. Copy `allowed_emails.example.txt` to `allowed_emails.txt` and list who may sign in (while the app is in Testing mode, those people must also be test users on the OAuth consent screen). The real file and `operator_emails.txt` are git-ignored.
+3. Nothing to do for the sign-in list: it lives in Secret Manager (`nba-allowed-emails`), so a deploy can never shrink it. Only the project owner changes it, with `./07_deploy.sh allowlist set <file>` (and, optionally, `operators set <file>` to limit who may change data; everyone else can then only view).
 
 Everything shares one GCP project and one BigQuery dataset, so coordinate deploys, and remember that Admin scenarios change the data for everyone. `01_load_glucoren.sh` is the one-time data load; it needs `NBA_COURSE_REPO` pointing at the course repo folder.
 

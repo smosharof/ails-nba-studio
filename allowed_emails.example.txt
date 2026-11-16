@@ -1,4 +1,5 @@
-# One Google account per line: the people who may sign in to the deployed console and Recommender.
-# Copy this file to allowed_emails.txt (git-ignored) and replace the examples. Blank lines and '#' lines are ignored.
+# Input format for:  ./07_deploy.sh allowlist set <file>   (also: operators set <file>)
+# One Google account per line. Blank lines and '#' lines are ignored. The list is stored in Secret Manager,
+# not in the repo, so a local copy of this file is only a scratch file (git-ignored once renamed).
 teammate1@example.edu
 teammate2@example.edu

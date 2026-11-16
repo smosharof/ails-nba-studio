@@ -12,6 +12,45 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 STAGE_ROOT="${TMPDIR:-/tmp}/nba_deploy"
 G=(--project="$PROJECT" --account="$ACCOUNT" --quiet)
 
+# ---- Who may sign in lives in Secret Manager, not in a local file, so nobody's deploy can shrink the list by accident.
+#   nba-allowed-emails   comma-separated Google accounts that may sign in (required for the login-gated deploys)
+#   nba-operator-emails  OPTIONAL: if it exists, only these accounts may change things (everyone else can only view)
+# The project owner changes them:  ./07_deploy.sh allowlist set <file> | show      ./07_deploy.sh operators set <file> | show | clear
+ALLOW_SECRET="nba-allowed-emails"
+OPS_SECRET="nba-operator-emails"
+
+secret_exists() { gcloud secrets describe "$1" "${G[@]}" >/dev/null 2>&1; }
+
+login_secrets() {
+  # The --set-secrets value for a login-gated service: OAuth client secret, session key, the allowlist, optional operators.
+  secret_exists "$ALLOW_SECRET" || { echo "missing secret $ALLOW_SECRET: ask the project owner to run  ./07_deploy.sh allowlist set <file>" >&2; return 1; }
+  local v="OAUTH_CLIENT_SECRET=nba-oauth-client-secret:latest,SESSION_KEY=nba-session-key:latest,ALLOWED_EMAILS=${ALLOW_SECRET}:latest"
+  if secret_exists "$OPS_SECRET"; then v="${v},OPERATOR_EMAILS=${OPS_SECRET}:latest"; fi
+  printf '%s' "$v"
+}
+
+email_list_cmd() {  # email_list_cmd <secret> <set FILE | show | clear>
+  local secret="$1" action="${2:-}" file="${3:-}"
+  case "$action" in
+    show) gcloud secrets versions access latest --secret="$secret" "${G[@]}" | tr ',' '\n' ;;
+    clear) gcloud secrets delete "$secret" "${G[@]}" && echo "deleted $secret" ;;
+    set)
+      [ -s "$file" ] || { echo "usage: $0 <allowlist|operators> set <file>   (one Google account per line; blank and # lines are ignored)"; exit 1; }
+      local list; list="$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$file" | sed -E 's/[[:space:]]+//g' | paste -sd, -)" || true
+      [ -n "$list" ] || { echo "no addresses found in $file"; exit 1; }
+      local bad; bad="$(printf '%s' "$list" | tr ',' '\n' | grep -v -E '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' || true)"
+      [ -z "$bad" ] || { echo "not an email address: $bad"; exit 1; }
+      secret_exists "$secret" || gcloud secrets create "$secret" --replication-policy=automatic "${G[@]}"
+      printf '%s' "$list" | gcloud secrets versions add "$secret" --data-file=- "${G[@]}" >/dev/null
+      local sa
+      for sa in "nba-pipeline@${PROJECT}.iam.gserviceaccount.com" "nba-agent2-reader@${PROJECT}.iam.gserviceaccount.com"; do
+        gcloud secrets add-iam-policy-binding "$secret" --member="serviceAccount:${sa}" --role=roles/secretmanager.secretAccessor "${G[@]}" >/dev/null
+      done
+      echo "$secret updated: $(printf '%s\n' "$list" | tr ',' '\n' | wc -l | tr -d ' ') address(es). Redeploy (./07_deploy.sh console-public) for a running service to pick it up." ;;
+    *) echo "usage: $0 <allowlist|operators> set <file> | show$( [ "$secret" = "$OPS_SECRET" ] && echo ' | clear')"; exit 1 ;;
+  esac
+}
+
 deploy_agent2() {
   local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
   cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
@@ -36,13 +75,13 @@ EOF
 
 deploy_agent2_public() {
   # Agent 2 reachable from the internet, gated by "Sign in with Google" (webauth.py) and an allowlist
-  # (allowed_emails.txt). Needs: secret nba-oauth-client-secret (the OAuth client secret) and nba-session-key,
+  # (secret nba-allowed-emails). Needs: secret nba-oauth-client-secret (the OAuth client secret) and nba-session-key,
   # and NBA_OAUTH_CLIENT_ID set to the OAuth client ID. The console is NOT touched and stays private.
   : "${NBA_OAUTH_CLIENT_ID:?set NBA_OAUTH_CLIENT_ID to the OAuth client ID}"
   for s in nba-oauth-client-secret nba-session-key; do
     gcloud secrets describe "$s" "${G[@]}" >/dev/null 2>&1 || { echo "missing secret: $s"; exit 1; }
   done
-  [ -s "$HERE/allowed_emails.txt" ] || { echo "allowed_emails.txt is missing or empty: copy allowed_emails.example.txt to allowed_emails.txt and list the people who may sign in"; exit 1; }
+  local secrets; secrets="$(login_secrets)" || exit 1
   local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
   cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
   [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
@@ -53,15 +92,14 @@ COPY . /app
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "agent2.py", "--serve"]
 DOCKER
-  local emails; emails="$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$HERE/allowed_emails.txt" | paste -sd, -)"
   local num; num="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' --account="$ACCOUNT")"
   local url="https://nba-agent2-${num}.${REGION}.run.app"
   gcloud run deploy nba-agent2 --source "$d" --region "$REGION" \
     --service-account "nba-agent2-reader@${PROJECT}.iam.gserviceaccount.com" \
     --allow-unauthenticated --min-instances 0 --max-instances 2 \
     --memory 512Mi --cpu 1 --timeout 120 \
-    --set-env-vars "^|^NBA_PROJECT=${PROJECT}|NBA_REQUIRE_LOGIN=1|OAUTH_CLIENT_ID=${NBA_OAUTH_CLIENT_ID}|BASE_URL=${url}|ALLOWED_EMAILS=${emails}" \
-    --set-secrets "OAUTH_CLIENT_SECRET=nba-oauth-client-secret:latest,SESSION_KEY=nba-session-key:latest" "${G[@]}"
+    --set-env-vars "^|^NBA_PROJECT=${PROJECT}|NBA_REQUIRE_LOGIN=1|OAUTH_CLIENT_ID=${NBA_OAUTH_CLIENT_ID}|BASE_URL=${url}" \
+    --set-secrets "$secrets" "${G[@]}"
   echo "Agent 2 is public but gated by Sign in with Google: ${url}"
 }
 
@@ -133,12 +171,12 @@ DOCKER
 deploy_console_public() {
   # The console reachable from a browser, gated by Sign in with Google (webauth.py) + allowlist, with every request
   # needing a same-origin JSON call and every change audited. It can CHANGE DATA and run retrains: only add people you trust.
-  # Optional: put emails in operator_emails.txt to let only those people change things (others can view).
+  # Optional: create the secret nba-operator-emails (./07_deploy.sh operators set <file>) to let only those people change things.
   : "${NBA_OAUTH_CLIENT_ID:?set NBA_OAUTH_CLIENT_ID to the OAuth client ID}"
   for s in nba-oauth-client-secret nba-session-key; do
     gcloud secrets describe "$s" "${G[@]}" >/dev/null 2>&1 || { echo "missing secret: $s"; exit 1; }
   done
-  [ -s "$HERE/allowed_emails.txt" ] || { echo "allowed_emails.txt is missing or empty: copy allowed_emails.example.txt to allowed_emails.txt and list the people who may sign in"; exit 1; }
+  local secrets; secrets="$(login_secrets)" || exit 1
   smoke_gate
   local d="$STAGE_ROOT/console"; rm -rf "$d"; mkdir -p "$d/outputs"
   cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
@@ -152,19 +190,14 @@ COPY . /app
 ENV PYTHONUNBUFFERED=1 NBA_BIND=0.0.0.0
 CMD ["python", "console.py"]
 DOCKER
-  local emails; emails="$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$HERE/allowed_emails.txt" | paste -sd, -)"
-  local ops=""
-  if [ -s "$HERE/operator_emails.txt" ]; then
-    ops="|OPERATOR_EMAILS=$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$HERE/operator_emails.txt" | paste -sd, -)"
-  fi
   local num; num="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' --account="$ACCOUNT")"
   local url="https://nba-console-${num}.${REGION}.run.app"
   gcloud run deploy nba-console --source "$d" --region "$REGION" \
     --service-account "nba-pipeline@${PROJECT}.iam.gserviceaccount.com" \
     --allow-unauthenticated --min-instances 0 --max-instances 1 --concurrency 20 \
     --memory 2Gi --cpu 2 --no-cpu-throttling --timeout 3600 \
-    --set-env-vars "^|^NBA_PROJECT=${PROJECT}|NBA_REQUIRE_LOGIN=1|OAUTH_CLIENT_ID=${NBA_OAUTH_CLIENT_ID}|BASE_URL=${url}|ALLOWED_EMAILS=${emails}|SESSION_AUD=console|SESSION_TTL_S=3600|NBA_SQL_SA=nba-sql-reader@${PROJECT}.iam.gserviceaccount.com${ops}" \
-    --set-secrets "OAUTH_CLIENT_SECRET=nba-oauth-client-secret:latest,SESSION_KEY=nba-session-key:latest" "${G[@]}"
+    --set-env-vars "^|^NBA_PROJECT=${PROJECT}|NBA_REQUIRE_LOGIN=1|OAUTH_CLIENT_ID=${NBA_OAUTH_CLIENT_ID}|BASE_URL=${url}|SESSION_AUD=console|SESSION_TTL_S=3600|NBA_SQL_SA=nba-sql-reader@${PROJECT}.iam.gserviceaccount.com" \
+    --set-secrets "$secrets" "${G[@]}"
   echo "Console is public but gated by Sign in with Google: ${url}"
 }
 
@@ -174,6 +207,8 @@ case "${1:-all}" in
   agent1) deploy_agent1 ;;
   console) deploy_console ;;
   console-public) deploy_console_public ;;
+  allowlist) email_list_cmd "$ALLOW_SECRET" "${2:-}" "${3:-}" ;;
+  operators) email_list_cmd "$OPS_SECRET" "${2:-}" "${3:-}" ;;
   all) deploy_agent2; deploy_agent1; deploy_console ;;
-  *) echo "usage: $0 agent2|agent2-public|agent1|console|console-public|all"; exit 1 ;;
+  *) echo "usage: $0 agent2|agent2-public|agent1|console|console-public|all|allowlist ...|operators ..."; exit 1 ;;
 esac
