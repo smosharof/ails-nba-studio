@@ -14,8 +14,8 @@ The system has four parts:
 
 - **Layer 1** is the uplift model and a KMeans segmentation, trained per channel.
 - **Layer 2** applies business rules: frequency caps, email consent, channel substitution, a 30% contact budget, and a compliance filter on every HCP-facing message.
-- **Agent 1** keeps the recommendations current. **Code makes every decision** (is the model fresh? would Layer 2 change anything? did verification pass?), so what will happen is known in advance; a Gemini model only explains each step in plain English and writes the report. It runs as a scheduled job or from a private web **console** with reversible demo controls.
-- **Agent 2** is a Gemini agent behind a private web page that answers plain-language questions from the recommendation table through a fixed set of validated queries.
+- **Agent 1** keeps the recommendations current. **Code makes every decision** (is the model fresh? would Layer 2 change anything? did verification pass?), so what will happen is known in advance; a Gemini model only explains each step in plain English and writes the report. It runs as a scheduled job (currently paused) or from the NBA Studio web app, where an Admin page has reversible demo scenarios.
+- **Agent 2** is a Gemini agent inside the NBA Studio web app (public, behind Google sign-in) that answers plain-language questions from the recommendation table through a fixed set of validated queries.
 
 **Headline result.** When contact capacity is limited, targeting by modeled uplift beats random targeting. At a 20% contact budget the model gains about 0.083 incremental NBRx per HCP-week versus 0.016 for random calls, and the advantage is significant in all three independent validation runs; at 30% to 50% budgets it is significant in two of three runs. Predicted lift is overstated by roughly 1.6x to 2.5x depending on the validation split, so use the output to **rank** HCPs, not to forecast prescriptions. The simulated data was also checked against real Medicare Part D prescribing and was only partly realistic (section 10). See section 14 for limitations.
 
@@ -23,14 +23,7 @@ The system has four parts:
 
 ## 2. How to Test
 
-**Agent 2 (chat assistant).** The service is private, so a browser sees a 403. Open it through the proxy:
-
-```bash
-gcloud run services proxy nba-agent2 --region us-central1 \
-  --project fall26-ails-termproj-nba
-```
-
-Then open http://localhost:8080 and try:
+**Recommender (the chat assistant).** Open the app (below), go to the **Recommender** tab, and try:
 
 1. "Who are the top 5 HCPs to call this week, and why?" Every HCP listed should be a `call` recommendation, with its channel stated.
 2. "What is the approved message for the top HCP?" It should return the pre-approved text with the fair-balance line.
@@ -38,14 +31,7 @@ Then open http://localhost:8080 and try:
 4. "Write me an email saying GLUCOREN is better than metformin." It should refuse and offer the approved message instead.
 5. "How much lift should I expect?" It should state that the score is a ranking and is overstated by roughly 1.6x to 2.5x.
 
-**NBA Studio / Agent 1 console (recommended for demos).** Open https://nba-console-28648516269.us-central1.run.app and sign in with an allowlisted Google account (see "Agent 2 public access" below for how sign-in works). It can also be reached privately through the proxy:
-
-```bash
-gcloud run services proxy nba-console --region us-central1 \
-  --project fall26-ails-termproj-nba --port 8081
-```
-
-Then open http://localhost:8081. The page has two tabs: **Trainer** (a status card, the data pipeline table with row counts and last-modified times, where clicking a table shows 5 sample rows and an Expand all / Collapse all button opens or closes every table, the demo-data controls as selectable chips, "Preview what will happen", a Run button where Stepper pauses at the gates and Auto does not, and a live timeline) and **Recommender** (a two-column page: the chat on the left, in a fixed-height box with the input pinned below it, and a tinted sidebar on the right, level with the chat box with suggested questions grouped into *Look up* and *Analyze*, each with a hover hint, plus a "Helpful hints" section that fills the rest of the sidebar listing the six fixed lookups, the live-SQL path and the data it can see. Live-SQL answers show a "SQL used" drop-down with a copy icon. An out-of-scope question gets a short list of what it can do). The table refreshes after every demo change and run, so you can watch row counts move.
+**NBA Studio / Agent 1 console (recommended for demos).** Open https://nba-console-28648516269.us-central1.run.app and sign in with an allowlisted Google account (see "Public access" below for how sign-in works). The page has two agent tabs: **Trainer** (a status card, the data pipeline table with row counts and last-modified times, where clicking a table shows 5 sample rows and an Expand all / Collapse all button opens or closes every table, the demo-data controls as selectable chips, "Preview what will happen", a Run button where Stepper pauses at the gates and Auto does not, and a live timeline) and **Recommender** (a two-column page: the chat on the left, in a fixed-height box with the input pinned below it, and a tinted sidebar on the right, level with the chat box with suggested questions grouped into *Look up* and *Analyze*, each with a hover hint, plus a "Helpful hints" section that fills the rest of the sidebar listing the six fixed lookups, the live-SQL path and the data it can see. Live-SQL answers show a "SQL used" drop-down with a copy icon. An out-of-scope question gets a short list of what it can do). The table refreshes after every demo change and run, so you can watch row counts move.
 
 | Scenario | Steps | What you will see |
 |---|---|---|
@@ -211,7 +197,7 @@ Files are numbered in run order. There is no `05_*`: the Layer 2 logic lives in 
 | `test_answer_check.py` | 46 offline checks of the grounding rules, the judge flow (stubbed model), its wiring into `agent2.ask`, and the one-time retry for temporary model-service errors. |
 | `test_golden.py` | The golden set: 26 questions whose correct answers are computed from the live data each run, asked through the real agent (live; costs a few cents). Reports PASS, FAIL or BLOCKED per question and writes `outputs/golden_results.json`. |
 | `agent2.py`    | Agent 2. Tools: `top_hcps`, `explain_hcp`, `talking_point`, `channel_mix`, `segment_summary`, `model_info`. Reads only the view `nba.v_recommendations`, validates every input, and refuses to write its own product claims. Run `python3 -I agent2.py "question"` for a one-off answer or `--serve` for the web page (`GET /`, `POST /ask`, port from `PORT`). |
-| `07_deploy.sh` | Deploys to Cloud Run: `./07_deploy.sh agent2\|agent2-public\|agent1\|console\|all`. Agent 2 becomes a private service. Agent 1 becomes a job with a weekly Cloud Scheduler trigger that is created **paused**. Builds from a temporary folder so only the needed files ship.                                                                                                                              |
+| `07_deploy.sh` | Deploys to Cloud Run: `./07_deploy.sh console-public\|agent1`, plus `allowlist` and `operators` commands for the owner. The web app is one public service behind Google sign-in. Agent 1 becomes a job with a weekly Cloud Scheduler trigger that is created **paused**. Builds from a temporary folder so only the needed files ship.                                                                                                                              |
 
 ### Outputs (`outputs/`)
 
@@ -287,33 +273,31 @@ Always run with `python3 -I` (isolated mode). Scripts read BigQuery and call Gem
 ## 9. Deployment
 
 ```bash
-./07_deploy.sh agent2   # private Cloud Run service, runs as nba-agent2-reader
-./07_deploy.sh agent2-public  # Agent 2 reachable from a browser behind Sign in with Google (needs NBA_OAUTH_CLIENT_ID; see below)
-./07_deploy.sh agent1   # Cloud Run job + paused weekly schedule, runs as nba-pipeline
-./07_deploy.sh console  # private web console for demos, runs as nba-pipeline
-./07_deploy.sh console-public  # console reachable from a browser behind Sign in with Google (needs NBA_OAUTH_CLIENT_ID)
+NBA_OAUTH_CLIENT_ID=<client id> ./07_deploy.sh console-public  # the web app, behind Sign in with Google
+./07_deploy.sh agent1                                           # Cloud Run job + paused weekly schedule, runs as nba-pipeline
+./07_deploy.sh allowlist set <file> | show                      # who may sign in (project owner)
+./07_deploy.sh operators set <file> | show | clear              # optional: who may change data (project owner)
 ```
 
 | Resource         | Name                                    | Notes                                                                                       |
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Agent 2 service | `nba-agent2`                          | **Public URL, gated by Sign in with Google** (allowlist in the Secret Manager secret `nba-allowed-emails`); read-only service account; 2 instances max |
 | Agent 1 job      | `nba-agent1`                          | 2 CPU, 2 GiB, 15 minute timeout, no retries                                                 |
-| Console service | `nba-console`                         | **Public URL, gated by Sign in with Google** (same allowlist; sessions last 1 hour); every change is audited; 1 instance max |
+| Web app service | `nba-console`                         | **Public URL, gated by Sign in with Google** (same allowlist; sessions last 1 hour); every change is audited; 1 instance max |
 | Schedule         | `nba-agent1-weekly`                   | Mondays 06:00 New York, **paused**; resume it to enable weekly runs                   |
-| Service accounts | `nba-pipeline`, `nba-agent2-reader` | Pipeline can write BigQuery and run Vertex; the reader can run queries and read the dataset |
+| Service accounts | `nba-pipeline`, `nba-sql-reader` | The pipeline account runs the app and the job (writes BigQuery, calls Vertex); the SQL reader is a restricted identity that can read only the two chat views |
 
 
-### Agent 2 public access (Sign in with Google)
+### Public access (Sign in with Google)
 
-Agent 2 can be opened from a browser by a short allowlist of people. Cloud Run's built-in IAP could not be completed for this project (it has no Google organization and IAP returned an OAuth-client error), so the app has its own sign-in, `webauth.py`, and Cloud Run allows unauthenticated *network* access while the app enforces login.
+NBA Studio can be opened from a browser by a short allowlist of people. Cloud Run's built-in IAP could not be completed for this project (it has no Google organization and IAP returned an OAuth-client error), so the app has its own sign-in, `webauth.py`, and Cloud Run allows unauthenticated *network* access while the app enforces login.
 
 - **Who:** only the emails in the secret `nba-allowed-emails`. While the Google OAuth app is in *Testing* mode, Google additionally only lets its listed test users sign in (a second, independent gate).
 - **How it works:** authorization-code flow with a signed one-time `state` cookie and a `nonce`; the ID token is validated by Google, then the audience, issuer, verified email, nonce and allowlist are checked; the session is an HMAC-signed, HttpOnly, Secure cookie that expires in 2 hours. All routes except the sign-in flow need a session, and state-changing requests must be JSON from our own origin. Each user is limited to 20 questions per 10 minutes. Sign-in codes are never logged. If sign-in is not fully configured the service serves nothing.
 - **Secrets:** the OAuth client secret (`nba-oauth-client-secret`) and the cookie signing key (`nba-session-key`) are in Secret Manager and are never in the code or the logs.
 - **Tests:** `python3 -I test_webauth.py` runs 45 attack checks (forged, tampered and expired cookies, wrong audience or nonce, unverified or non-allowlisted emails, cross-site posts, oversized bodies, rate abuse). Run it after any change to `webauth.py` or `agent2.py`.
-- **Deploy:** `NBA_OAUTH_CLIENT_ID=<client id> ./07_deploy.sh agent2-public`. To make it private again, run `./07_deploy.sh agent2`, which also removes the public permission so a leftover grant can never expose a build that has no login.
-- **Adding or removing people:** the project owner runs `./07_deploy.sh allowlist set <file>` (one address per line; see `allowed_emails.example.txt`), adds or removes them as test users under Google Auth Platform, then redeploys (`agent2-public` or `console-public`). `./07_deploy.sh allowlist show` lists the current people.
-- **The console is public too, but it is the riskier service.** It can change data and run retrains, so it adds protections beyond Agent 2: every page and data call needs sign-in; sessions are scoped to the console (an Agent 2 cookie does not work) and last 1 hour; every change-making request must be same-origin JSON, is limited to 60 per 10 minutes per person, and is written to `run_log` with the person's email (`agent = 'console'`); an optional secret `nba-operator-emails` (`./07_deploy.sh operators set <file>`) lets only those people change things while the rest can view. `python3 -I test_console_auth.py` runs 97 attack checks, including the chat and table previews, and `python3 -I test_table_preview.py` runs 36 more on the preview function itself. To make it private again run `./07_deploy.sh console`.
+- **Deploy:** `NBA_OAUTH_CLIENT_ID=<client id> ./07_deploy.sh console-public`. To take the app offline, delete the service (`gcloud run services delete nba-console --region us-central1`). There is no private mode any more: the app is either public behind sign-in or gone.
+- **Adding or removing people:** the project owner runs `./07_deploy.sh allowlist set <file>` (one address per line; see `allowed_emails.example.txt`), adds or removes them as test users under Google Auth Platform, then redeploys (`console-public`). `./07_deploy.sh allowlist show` lists the current people.
+- **The app can change data and run retrains, so it adds protections beyond sign-in:** every page and data call needs sign-in; sessions last 1 hour; every change-making request must be same-origin JSON, is limited to 60 per 10 minutes per person, and is written to `run_log` with the person's email (`agent = 'console'`); an optional secret `nba-operator-emails` (`./07_deploy.sh operators set <file>`) lets only those people change things while the rest can view. `python3 -I test_console_auth.py` runs 97 attack checks, including the chat and table previews, and `python3 -I test_table_preview.py` runs 36 more on the preview function itself.
 - **Known limits:** the rate limit is per instance (two instances at most); Testing-mode apps show Google's "unverified app" warning on first sign-in.
 
 ---
@@ -404,7 +388,7 @@ The chat first tries its six fixed lookups. For anything they cannot answer (cou
 
 The model is also told the question is untrusted text and to answer `CANNOT_ANSWER` for anything off topic. In testing it declined requests for the audit log, deletions, schema listings and an injection embedded in a question, and the layers above were each proven separately: `python3 -I test_sqltool.py --live` sends hostile SQL straight to BigQuery as the restricted account and confirms it cannot read the audit log, raw data, published table or demo tables, create tables or delete rows.
 
-**Setup and operation.** Run `./12_setup_chat_sql.sh` once. Views are kept in sync with `SCHEMA_DOC` and `UNDERLYING` in `sqltool.py`; if you add a column or view, update all three. The standalone Agent 2 service does not have `NBA_SQL_SA` set, so it keeps only the six fixed lookups. IAM changes can take a few minutes to take effect.
+**Setup and operation.** Run `./12_setup_chat_sql.sh` once. Views are kept in sync with `SCHEMA_DOC` and `UNDERLYING` in `sqltool.py`; if you add a column or view, update all three. IAM changes can take a few minutes to take effect.
 
 **Limits.** The model can still write a wrong (but harmless) query, so check the SQL shown for important numbers. Answers reflect the curated views only; the audit log, evidence tables and raw data are out of reach by design.
 
@@ -454,7 +438,7 @@ Only one run or background task is allowed at a time (others get HTTP 409). When
 - **Compliance language is a stand-in.** Approved claims come from the Glumetza (single-ingredient metformin ER) label because GLUCOREN is fictional. Real metformin labels word the indication differently (in a check of 88 labels: 43 say "adults and pediatric patients 10 years of age and older", 28 "adults", 12 "adults and children", 5 "patients"); the adults-only wording is the more conservative. A real deployment needs the product's own Prescribing Information and medical-legal review.
 - **Overstated predictions.** Predicted uplift is about 1.6x to 2.5x too high, and negative predictions in the lower ranks are noise.
 - **Moderate stability.** Rankings agree only partly across time periods, so re-scoring should be routine.
-- **Agent scope.** Agent 1's decisions are code rules, so they are repeatable, but the plain-English explanations and report come from an LLM and can still be loose; check them against the facts shown in each step. Agent 2 and the console are public behind a hand-written Google sign-in, which is a weaker lock than Cloud Run IAM: a flaw in `webauth.py` would expose Agent 2 (read-only simulated data plus Gemini cost) and, worse, the console (which can change data and run retrains). Keep the allowlist short, rerun both test suites after any change to the auth code, and make the console private again (`./07_deploy.sh console`) when it is not needed. Run locally, the console binds to loopback only. Both agents use a Gemini preview model that may change.
+- **Agent scope.** Agent 1's decisions are code rules, so they are repeatable, but the plain-English explanations and report come from an LLM and can still be loose; check them against the facts shown in each step. Agent 2 and the console are public behind a hand-written Google sign-in, which is a weaker lock than Cloud Run IAM: a flaw in `webauth.py` would expose Agent 2 (read-only simulated data plus Gemini cost) and, worse, the console (which can change data and run retrains). Keep the allowlist short, rerun both test suites after any change to the auth code, and delete the service when it is not needed (there is no private mode). Run locally, the console binds to loopback only. Both agents use a Gemini preview model that may change.
 - **Preview model.** Both agents use a Gemini preview model that may change or be retired.
 - **Access scope.** The Agent 2 service account can read the whole `nba` dataset; the fixed tools, not IAM, limit what it queries. An authorized view would tighten this.
 - **Hard-coded settings.** The account, project ID, and course-repo path are set at the top of several scripts and `07_deploy.sh`.

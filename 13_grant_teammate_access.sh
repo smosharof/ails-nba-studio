@@ -18,7 +18,7 @@ if [ "${1:-}" = "--revoke" ]; then VERB="remove"; shift; fi
 [ "$#" -ge 1 ] || { echo "usage: $0 [--revoke] email [email ...]"; exit 1; }
 
 PROJECT_ROLES=(
-  roles/run.admin                         # deploy and update the console / Agent 2, make a service public or private
+  roles/run.admin                         # deploy and update the web app, make a service public or private
   roles/cloudbuild.builds.editor          # build the container from source
   roles/cloudscheduler.admin              # Agent 1's (paused) weekly schedule
   roles/serviceusage.serviceUsageConsumer # let command-line tools use the project's APIs
@@ -29,7 +29,7 @@ PROJECT_ROLES=(
   roles/logging.viewer                    # read Cloud Run logs
 )
 NUM="$(gcloud projects describe "$P" --format='value(projectNumber)')"
-ACT_AS=("nba-pipeline@${P}.iam.gserviceaccount.com" "nba-agent2-reader@${P}.iam.gserviceaccount.com" "${NUM}-compute@developer.gserviceaccount.com")
+ACT_AS=("nba-pipeline@${P}.iam.gserviceaccount.com" "${NUM}-compute@developer.gserviceaccount.com")
 
 for U in "$@"; do
   [[ "$U" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "not an email address: $U"; exit 1; }

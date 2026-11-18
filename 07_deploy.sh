@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Deploy Agent 2 (Cloud Run service, PRIVATE) and Agent 1 (Cloud Run Job + PAUSED weekly schedule).
-# Builds from a temp staging dir so only the needed files are shipped.
-#   ./07_deploy.sh agent2|agent2-public|agent1|console|console-public|all   ('all' keeps everything private)
+# Deploy the public web app (NBA Studio: Trainer, Recommender and Admin in one Cloud Run service, gated by Sign in with Google)
+# and Agent 1 (Cloud Run Job + PAUSED weekly schedule). Builds from a temp staging dir so only the needed files are shipped.
+#   ./07_deploy.sh console-public     the web app (needs NBA_OAUTH_CLIENT_ID)
+#   ./07_deploy.sh agent1             the scheduled Trainer job (its schedule stays paused)
+#   ./07_deploy.sh allowlist ...      who may sign in (owner)         ./07_deploy.sh operators ...   who may change data (owner)
 set -euo pipefail
 
 PROJECT="fall26-ails-termproj-nba"
@@ -43,64 +45,12 @@ email_list_cmd() {  # email_list_cmd <secret> <set FILE | show | clear>
       secret_exists "$secret" || gcloud secrets create "$secret" --replication-policy=automatic "${G[@]}"
       printf '%s' "$list" | gcloud secrets versions add "$secret" --data-file=- "${G[@]}" >/dev/null
       local sa
-      for sa in "nba-pipeline@${PROJECT}.iam.gserviceaccount.com" "nba-agent2-reader@${PROJECT}.iam.gserviceaccount.com"; do
+      for sa in "nba-pipeline@${PROJECT}.iam.gserviceaccount.com"; do
         gcloud secrets add-iam-policy-binding "$secret" --member="serviceAccount:${sa}" --role=roles/secretmanager.secretAccessor "${G[@]}" >/dev/null
       done
       echo "$secret updated: $(printf '%s\n' "$list" | tr ',' '\n' | wc -l | tr -d ' ') address(es). Redeploy (./07_deploy.sh console-public) for a running service to pick it up." ;;
     *) echo "usage: $0 <allowlist|operators> set <file> | show$( [ "$secret" = "$OPS_SECRET" ] && echo ' | clear')"; exit 1 ;;
   esac
-}
-
-deploy_agent2() {
-  local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/answer_check.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
-  [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
-  cat > "$d/Dockerfile" <<'EOF'
-FROM python:3.12-slim
-WORKDIR /app
-COPY . /app
-ENV PYTHONUNBUFFERED=1
-CMD ["python", "agent2.py", "--serve"]
-EOF
-  gcloud run deploy nba-agent2 --source "$d" --region "$REGION" \
-    --service-account "nba-agent2-reader@${PROJECT}.iam.gserviceaccount.com" \
-    --no-allow-unauthenticated --min-instances 0 --max-instances 2 \
-    --memory 512Mi --cpu 1 --timeout 120 \
-    --set-env-vars "NBA_PROJECT=${PROJECT}" "${G[@]}"
-  # SAFETY: this build has no login, so it must never be publicly invokable. Remove a leftover public grant
-  # from an earlier `agent2-public` deploy (ignore the error if there is none).
-  gcloud run services remove-iam-policy-binding nba-agent2 --region "$REGION" \
-    --member=allUsers --role=roles/run.invoker "${G[@]}" >/dev/null 2>&1 || true
-}
-
-deploy_agent2_public() {
-  # Agent 2 reachable from the internet, gated by "Sign in with Google" (webauth.py) and an allowlist
-  # (secret nba-allowed-emails). Needs: secret nba-oauth-client-secret (the OAuth client secret) and nba-session-key,
-  # and NBA_OAUTH_CLIENT_ID set to the OAuth client ID. The console is NOT touched and stays private.
-  : "${NBA_OAUTH_CLIENT_ID:?set NBA_OAUTH_CLIENT_ID to the OAuth client ID}"
-  for s in nba-oauth-client-secret nba-session-key; do
-    gcloud secrets describe "$s" "${G[@]}" >/dev/null 2>&1 || { echo "missing secret: $s"; exit 1; }
-  done
-  local secrets; secrets="$(login_secrets)" || exit 1
-  local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/answer_check.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
-  [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
-  cat > "$d/Dockerfile" <<'DOCKER'
-FROM python:3.12-slim
-WORKDIR /app
-COPY . /app
-ENV PYTHONUNBUFFERED=1
-CMD ["python", "agent2.py", "--serve"]
-DOCKER
-  local num; num="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' --account="$ACCOUNT")"
-  local url="https://nba-agent2-${num}.${REGION}.run.app"
-  gcloud run deploy nba-agent2 --source "$d" --region "$REGION" \
-    --service-account "nba-agent2-reader@${PROJECT}.iam.gserviceaccount.com" \
-    --allow-unauthenticated --min-instances 0 --max-instances 2 \
-    --memory 512Mi --cpu 1 --timeout 120 \
-    --set-env-vars "^|^NBA_PROJECT=${PROJECT}|NBA_REQUIRE_LOGIN=1|OAUTH_CLIENT_ID=${NBA_OAUTH_CLIENT_ID}|BASE_URL=${url}" \
-    --set-secrets "$secrets" "${G[@]}"
-  echo "Agent 2 is public but gated by Sign in with Google: ${url}"
 }
 
 deploy_agent1() {
@@ -143,31 +93,6 @@ smoke_gate() {
   fi
 }
 
-deploy_console() {
-  # The console has no login of its own: it is PRIVATE on Cloud Run (IAM) and reached through the proxy.
-  smoke_gate
-  local d="$STAGE_ROOT/console"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,answer_check.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
-  [ -f "$HERE/outputs/public_reference.json" ] && cp "$HERE/outputs/public_reference.json" "$d/outputs/"
-  [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
-  cat > "$d/Dockerfile" <<'DOCKER'
-FROM python:3.12-slim
-WORKDIR /app
-RUN pip install --no-cache-dir pandas numpy scikit-learn
-COPY . /app
-ENV PYTHONUNBUFFERED=1 NBA_BIND=0.0.0.0
-CMD ["python", "console.py"]
-DOCKER
-  gcloud run deploy nba-console --source "$d" --region "$REGION" \
-    --service-account "nba-pipeline@${PROJECT}.iam.gserviceaccount.com" \
-    --no-allow-unauthenticated --min-instances 0 --max-instances 1 --concurrency 20 \
-    --memory 2Gi --cpu 2 --no-cpu-throttling --timeout 3600 \
-    --set-env-vars "NBA_PROJECT=${PROJECT},NBA_SQL_SA=nba-sql-reader@${PROJECT}.iam.gserviceaccount.com" "${G[@]}"
-  # SAFETY: this build runs without login, so it must never be publicly invokable.
-  gcloud run services remove-iam-policy-binding nba-console --region "$REGION" \
-    --member=allUsers --role=roles/run.invoker "${G[@]}" >/dev/null 2>&1 || true
-}
-
 deploy_console_public() {
   # The console reachable from a browser, gated by Sign in with Google (webauth.py) + allowlist, with every request
   # needing a same-origin JSON call and every change audited. It can CHANGE DATA and run retrains: only add people you trust.
@@ -201,14 +126,10 @@ DOCKER
   echo "Console is public but gated by Sign in with Google: ${url}"
 }
 
-case "${1:-all}" in
-  agent2) deploy_agent2 ;;
-  agent2-public) deploy_agent2_public ;;
-  agent1) deploy_agent1 ;;
-  console) deploy_console ;;
+case "${1:-}" in
   console-public) deploy_console_public ;;
+  agent1) deploy_agent1 ;;
   allowlist) email_list_cmd "$ALLOW_SECRET" "${2:-}" "${3:-}" ;;
   operators) email_list_cmd "$OPS_SECRET" "${2:-}" "${3:-}" ;;
-  all) deploy_agent2; deploy_agent1; deploy_console ;;
-  *) echo "usage: $0 agent2|agent2-public|agent1|console|console-public|all|allowlist ...|operators ..."; exit 1 ;;
+  *) echo "usage: $0 console-public | agent1 | allowlist set <file>|show | operators set <file>|show|clear"; exit 1 ;;
 esac
