@@ -224,7 +224,11 @@ class H(BaseHTTPRequestHandler):
                 if not q:
                     return self._send(400, {"error": "question required"})
                 audit(user, "ask", {"question": q[:200]})
-                return self._send(200, agent2.ask(q))      # not under the workflow lock: asking never blocks a run
+                res = agent2.ask(q)                        # not under the workflow lock: asking never blocks a run
+                rv = res.get("review") or {}
+                if rv.get("blocked"):
+                    audit(user, "ask_blocked", {"reason": rv.get("reason"), "ids": rv.get("unknown_ids"), "issues": rv.get("issues")})
+                return self._send(200, res)
             except (ValueError, KeyError) as e:
                 return self._send(400, {"error": str(e)[:300]})
             except Exception as e:  # noqa: BLE001

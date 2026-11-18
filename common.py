@@ -125,16 +125,24 @@ def log_run(run_id, agent, step, decision, rationale="", inputs="", outputs="", 
 
 
 # ------------------------------------------------------------------------- Gemini
-def gemini(contents, system=None, tools=None, temperature=0.2, max_tokens=2048):
+def gemini(contents, system=None, tools=None, temperature=0.2, max_tokens=2048, json_mode=False):
     url = (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/global/"
            f"publishers/google/models/{GEMINI_MODEL}:generateContent")
     body = {"contents": contents,
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens}}
+    if json_mode:
+        body["generationConfig"]["responseMimeType"] = "application/json"
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
     if tools:
         body["tools"] = [{"functionDeclarations": tools}]
-    return _call(url, body)
+    for attempt in (1, 2):                      # one retry for a temporary rate-limit or service blip
+        try:
+            return _call(url, body)
+        except RuntimeError as e:
+            if attempt == 2 or not any(f"HTTP {code}" in str(e) for code in (429, 500, 502, 503, 504)):
+                raise
+            time.sleep(2.0)
 
 
 def run_agent(system, user, tool_specs, tool_impls, max_steps=10, on_event=None):

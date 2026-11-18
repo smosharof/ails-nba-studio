@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import answer_check  # noqa: E402
 import common  # noqa: E402
 import sqltool  # noqa: E402
 import webauth  # noqa: E402
@@ -31,6 +32,9 @@ SYSTEM = """You are Agent 2, a plain-language assistant for sales operations and
 at a pharma company (GLUCOREN, Type 2 Diabetes). You answer questions about the Next-Best-Action
 recommendation table using ONLY your tools. Rules:
 - Never invent numbers, HCP IDs or reasons; if a tool does not return it, say you don't have it.
+- When you list HCPs, show each one's priority_rank exactly as the tool returned it (an overall rank), never your own list position.
+- Give a reason (for example why a channel was switched or an HCP was recommended) ONLY if a tool returned it, in fields such as
+  blocked_reason or rationale; otherwise report the count or fact without explaining why.
 - If the user names a channel (call, email, digital) or segment, you MUST pass it as a filter to top_hcps,
   and always state each HCP's recommended channel in your answer.
 - Be concise and plain; use short lists or small tables. Lead with the answer.
@@ -119,11 +123,13 @@ def model_info():
               f"COUNT(*) AS hcps, COUNTIF(contact_flag) AS contacts FROM {VIEW}")[0]
     meta["contact_budget"] = "top 30% of HCPs by ranking score"
     ev = Path(__file__).resolve().parent / "outputs" / "evaluation.json"
-    meta["validation_caveats"] = (json.loads(ev.read_text()) if ev.exists() else
-                                  "Out-of-fold validation: actual lift per contact ~0.24-0.37 vs ~0.61 predicted (about 1.6x-2.5x overstated, "
-                                  "depending on the split); clearest gains for 'Movers', other segments not reliably positive; "
-                                  "ranking only moderately stable over time. Data are simulated; real Part D comparison shows the "
-                                  "simulation compresses differences between specialties.")
+    summary = ("Out-of-fold validation: actual lift per contact ~0.24-0.37 vs ~0.61 predicted (about 1.6x-2.5x overstated, "
+               "depending on the validation split); clearest gains for 'Movers', other segments not reliably positive; "
+               "ranking only moderately stable over time. Data are simulated; real Part D comparison shows the "
+               "simulation compresses differences between specialties.")
+    meta["validation_summary"] = summary         # always returned, so what the assistant says about caveats is also in its evidence
+    if ev.exists():
+        meta["validation_caveats"] = json.loads(ev.read_text())
     return meta
 
 
@@ -148,7 +154,7 @@ def capabilities_text():
 
 
 def ask(question: str):
-    used, sql_log = [], []
+    used, sql_log, evidence = [], [], []
     calls = {"ask_data": 0}
     tools, impls = list(TOOLS), dict(IMPLS)
     if sqltool.enabled():
@@ -167,8 +173,11 @@ def ask(question: str):
 
     def on_event(step, name, args, result, status, said):
         used.append({"tool": name, "args": args, "status": status})
+        if status == "ok":
+            evidence.append(result)           # what the tools actually returned: the evidence the answer is checked against
     answer = common.run_agent(SYSTEM + capabilities_text(), question[:2000], tools, impls, max_steps=6, on_event=on_event)
-    out = {"answer": answer, "tools_used": used}
+    rev = answer_check.review(question, answer, evidence)     # grounding check + second-model judge, before anything is shown
+    out = {"answer": rev["answer"], "tools_used": used, "review": rev["review"]}
     if sql_log:
         out["sql"] = sql_log[-1]["sql"]
         out["sql_rows"] = sql_log[-1]["rows"]

@@ -32,7 +32,7 @@ login_secrets() {
 email_list_cmd() {  # email_list_cmd <secret> <set FILE | show | clear>
   local secret="$1" action="${2:-}" file="${3:-}"
   case "$action" in
-    show) gcloud secrets versions access latest --secret="$secret" "${G[@]}" | tr ',' '\n' ;;
+    show) { gcloud secrets versions access latest --secret="$secret" "${G[@]}"; echo; } | tr ',' '\n' ;;
     clear) gcloud secrets delete "$secret" "${G[@]}" && echo "deleted $secret" ;;
     set)
       [ -s "$file" ] || { echo "usage: $0 <allowlist|operators> set <file>   (one Google account per line; blank and # lines are ignored)"; exit 1; }
@@ -53,7 +53,7 @@ email_list_cmd() {  # email_list_cmd <secret> <set FILE | show | clear>
 
 deploy_agent2() {
   local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
+  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/answer_check.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
   [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
   cat > "$d/Dockerfile" <<'EOF'
 FROM python:3.12-slim
@@ -83,7 +83,7 @@ deploy_agent2_public() {
   done
   local secrets; secrets="$(login_secrets)" || exit 1
   local d="$STAGE_ROOT/agent2"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
+  cp "$HERE/common.py" "$HERE/agent2.py" "$HERE/answer_check.py" "$HERE/sqltool.py" "$HERE/webauth.py" "$d/"
   [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
   cat > "$d/Dockerfile" <<'DOCKER'
 FROM python:3.12-slim
@@ -147,7 +147,7 @@ deploy_console() {
   # The console has no login of its own: it is PRIVATE on Cloud Run (IAM) and reached through the proxy.
   smoke_gate
   local d="$STAGE_ROOT/console"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
+  cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,answer_check.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
   [ -f "$HERE/outputs/public_reference.json" ] && cp "$HERE/outputs/public_reference.json" "$d/outputs/"
   [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
   cat > "$d/Dockerfile" <<'DOCKER'
@@ -179,7 +179,7 @@ deploy_console_public() {
   local secrets; secrets="$(login_secrets)" || exit 1
   smoke_gate
   local d="$STAGE_ROOT/console"; rm -rf "$d"; mkdir -p "$d/outputs"
-  cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
+  cp "$HERE"/{common.py,compliance.py,layer2.py,workflow.py,demo.py,console.py,console_page.html,agent2.py,answer_check.py,sqltool.py,webauth.py,03_baseline_uplift.py,02_build_features.sql} "$d/"
   [ -f "$HERE/outputs/public_reference.json" ] && cp "$HERE/outputs/public_reference.json" "$d/outputs/"
   [ -f "$HERE/outputs/evaluation.json" ] && cp "$HERE/outputs/evaluation.json" "$d/outputs/"
   cat > "$d/Dockerfile" <<'DOCKER'
