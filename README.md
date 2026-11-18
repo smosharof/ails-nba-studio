@@ -123,6 +123,55 @@ flowchart TD
 
 **Design note.** An earlier version let the LLM choose the sequence. It varied between runs (for example, skipping Layer 2 when nothing had changed), which makes a demo unpredictable. Moving the decisions into code trades some autonomy for predictability; the LLM keeps the part it is good at, explaining and flagging concerns.
 
+### Recommender: every answer is checked before it is shown
+
+The Recommender answers only from tool results, and a prompt tells it never to invent anything. A prompt is not a guarantee, so each answer goes through two independent checks before the user sees it: a deterministic grounding check, then a second, separate model call that acts as a judge ("model as a judge"). A golden set measures the whole path end to end.
+
+```mermaid
+flowchart TD
+    Q["Field user asks a question<br/>(Recommender tab)"] --> A["Recommender agent (Gemini)<br/>chooses which tool to call"]
+    A --> T1["Six fixed lookups<br/>top HCPs, explain an HCP, approved message,<br/>channel mix, segment summary, model caveats"]
+    A --> T2["ask_data: the model writes read-only SQL<br/>restricted account, two curated views,<br/>text check, dry run, size caps"]
+    T1 --> E["Evidence<br/>what the tools actually returned"]
+    T2 --> E
+    A --> D["Draft answer"]
+    D --> G1{"Check 1: grounding (code, free)<br/>is every HCP ID in the evidence<br/>or in the user's own question?"}
+    E --> G1
+    G1 -->|"an ID is invented"| B["BLOCKED<br/>safe message shown<br/>ask_blocked row written to run_log"]
+    G1 -->|"IDs are grounded"| J{"Check 2: LLM judge<br/>a separate Gemini call, temperature 0<br/>is every claim supported by the evidence?<br/>(skipped for a plain refusal)"}
+    E --> J
+    J -->|"unsupported"| B
+    J -->|"supported"| S["Answer shown"]
+    J -->|"judge error or unusable output"| S2["Answer shown<br/>review notes: judge unavailable"]
+```
+
+- **Check 1, grounding.** Every HCP ID in the answer must appear in the tool results or in the question. An invented ID blocks the answer without a judge call. Figures are matched allowing for rounding, percentages and list lengths; one that cannot be matched is passed to the judge, not blocked on its own.
+- **Check 2, the judge.** It sees the question, the answer and the raw tool output, each in its own tagged block it is told to treat as data. It rules the answer *supported* or *unsupported*, and flags invented promotional wording, guaranteed outcomes, and literature references presented as evidence about GLUCOREN. `unsupported` replaces the answer with a short, safe message.
+- **Fail closed on content, fail open on the reviewer.** A bad answer is never shown. If the judge call itself fails, the answer is shown and the review records `judge: unavailable`. `NBA_ANSWER_JUDGE=0` turns the judge off.
+- **Not covered.** There is no human approval step before a field representative acts on an answer. Promotional wording is never written by the model: it comes from one pre-approved label and passes the compliance filter, which fails closed.
+
+```mermaid
+flowchart LR
+    DB[("Live BigQuery data")] -->|"computed fresh on every run"| TR["Ground truth<br/>top HCPs, counts, averages,<br/>the approved claim, the model version"]
+    GS["26 golden questions<br/>test_golden.py"] --> AG["The real Recommender<br/>tools, SQL tool and answer checks"]
+    TR --> CMP{"Compare each answer<br/>with the ground truth"}
+    AG --> CMP
+    CMP --> P["PASS<br/>the facts match"]
+    CMP --> F["FAIL<br/>a wrong or missing fact"]
+    CMP --> BL["BLOCKED<br/>the gate replaced the answer"]
+    subgraph COV["What the 26 questions cover"]
+        U1["Rankings (6)<br/>top 5, by channel, by segment, ranks 1 to 3"]
+        U2["Explain and approved message (2)"]
+        U3["Counts and aggregates (8)<br/>contacts, by channel, substituted, no consent,<br/>region, segment, average years, call share"]
+        U4["Descriptive (3)<br/>top specialty, top region, model version"]
+        U5["Caveats (1)<br/>how much lift to expect"]
+        U6["Guardrails (6)<br/>cure claim, weather, poem, prompt injection,<br/>fake HCP ID, DROP TABLE"]
+    end
+    COV --> GS
+```
+
+The expected answers are computed from the live tables each run, so the set cannot go stale. `python3 -I test_golden.py` runs all 26 (live, a few cents of Gemini) and writes `outputs/golden_results.json`; `python3 -I test_answer_check.py` tests the checks offline (46 checks). Last full run: **26 of 26 passed** (21 answers judged *supported*, 5 refusals that skip the judge). The model is not deterministic, so treat the set as a regression signal, not a proof. The first live runs also found and fixed real problems; see [DESIGN_NOTES.md](DESIGN_NOTES.md).
+
 ---
 
 ## 4. Data Sources
